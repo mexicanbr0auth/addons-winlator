@@ -48,8 +48,8 @@ jobs:
       - name: Setup cross-compile wrappers
         run: |
           mkdir -p /tmp/clang-cross
-          printf '#!/bin/bash\nexec clang-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang
-          printf '#!/bin/bash\nexec clang++-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang++
+          printf '#!/bin/bash\nexec clang-17 --target=aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang
+          printf '#!/bin/bash\nexec clang++-17 --target=aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang++
           chmod +x /tmp/clang-cross/aarch64-clang /tmp/clang-cross/aarch64-clang++
 
       - name: Configure FEX (ARM64 cross-compile)
