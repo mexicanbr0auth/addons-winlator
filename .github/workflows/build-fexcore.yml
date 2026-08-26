@@ -2,22 +2,6 @@ name: "Build FEXCore (Winlator - Helio G99)"
 
 on:
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'Build variant (all/one)'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - fex-2507-full
-          - fex-2507-thunks
-          - fex-2506-stable
-          - fex-2505-legacy
-          - fex-2507-minimal
-  push:
-    tags:
-      - 'fex-*'
 
 env:
   FEX_REPO: 'https://github.com/FEX-Emu/FEX.git'
@@ -191,12 +175,4 @@ jobs:
           path: ${{ env.OUTPUT_DIR }}/*.tzst
           retention-days: 30
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.OUTPUT_DIR }}/*.tzst
-          generate_release_notes: true
-          name: "FEXCore ${{ matrix.variant }} - Helio G99"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

@@ -2,22 +2,6 @@ name: "Build Proton (Winlator - Mali G57)"
 
 on:
   workflow_dispatch:
-    inputs:
-      variant:
-        description: 'Build variant (all/one)'
-        required: false
-        default: 'all'
-        type: choice
-        options:
-          - all
-          - gplall-balanced
-          - gplall-performance
-          - gplall-compat
-          - dxvk-261
-          - dxvk-251
-  push:
-    tags:
-      - 'proton-*'
 
 env:
   DXVK_REPO: 'https://github.com/doitsujin/dxvk.git'
@@ -256,12 +240,4 @@ jobs:
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
 
-      - name: Create Release
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: softprops/action-gh-release@v2
-        with:
-          files: ${{ env.OUTPUT_DIR }}/*.wcp
-          generate_release_notes: true
-          name: "Proton ${{ matrix.variant }} - Mali G57"
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

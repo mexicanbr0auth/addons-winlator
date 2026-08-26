@@ -28,29 +28,21 @@ jobs:
   build-dxvk:
     if: inputs.build_dxvk == true
     uses: ./.github/workflows/build-dxvk.yml
-    with:
-      variant: all
     secrets: inherit
 
   build-dxvk-sarek:
     if: inputs.build_dxvk_sarek == true
     uses: ./.github/workflows/build-dxvk-sarek.yml
-    with:
-      variant: all
     secrets: inherit
 
   build-fex:
     if: inputs.build_fex == true
     uses: ./.github/workflows/build-fexcore.yml
-    with:
-      variant: all
     secrets: inherit
 
   build-proton:
     if: inputs.build_proton == true
     uses: ./.github/workflows/build-proton.yml
-    with:
-      variant: all
     secrets: inherit
 
   summary:
