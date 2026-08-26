@@ -49,9 +49,11 @@ jobs:
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
             git cmake ninja-build pkgconf ccache \
-            clang llvm lld zstd \
+            clang-17 llvm-17 lld-17 zstd \
             libssl-dev python3-setuptools libclang-17-dev \
-            clang-17 llvm-17 lld-17 nasm
+            libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
+            libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
+            libwayland-dev wayland-protocols nasm
 
       - name: Clone FEX
         run: |
