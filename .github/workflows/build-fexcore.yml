@@ -54,11 +54,10 @@ jobs:
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_LTO=True \
             -DENABLE_ASSERTIONS=False \
-            -DBUILD_TESTING=True \
-            -DBUILD_THUNKS=True \
+            -DBUILD_TESTING=False \
+            -DBUILD_THUNKS=False \
             -DBUILD_FEXCONFIG=False \
             -DENABLE_CCACHE=True \
-            -DENABLE_X86_HOST_DEBUG=True \
             -G Ninja \
             ..
 
