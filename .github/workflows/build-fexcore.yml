@@ -67,7 +67,7 @@ jobs:
         run: |
           cd fex
           mkdir Build && cd Build
-          cmake \
+          CC=clang CXX=clang++ cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_LINKER=lld \
