@@ -67,6 +67,12 @@ jobs:
           echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
 
+      - name: Fix DXVK-Sarek compile error (std::sqrtf)
+        run: |
+          cd dxvk-sarek
+          sed -i 's/std::sqrtf/std::sqrt/g' src/ddraw/d3d3/../d3d_process_vertices.h 2>/dev/null || true
+          find src/ -name "*.h" -o -name "*.cpp" | xargs sed -i 's/std::sqrtf/std::sqrt/g' 2>/dev/null || true
+
       - name: Build 64-bit DXVK-Sarek
         if: inputs.build_64bit == true
         run: |
