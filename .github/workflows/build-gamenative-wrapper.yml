@@ -24,12 +24,15 @@ jobs:
 
       - name: Install Android NDK
         run: |
-          if [ ! -d "$ANDROID_NDK" ]; then
+          if [ -d "$ANDROID_NDK" ]; then
+            echo "NDK already exists at $ANDROID_NDK"
+          else
+            echo "Downloading and installing NDK..."
             wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip -O /tmp/ndk.zip
             unzip -q /tmp/ndk.zip -d /opt
-            mv /opt/android-ndk-r27c "$ANDROID_NDK"
           fi
-          echo "NDK version: $(cat $ANDROID_NDK/source.properties | grep Pkg.Revision)"
+          echo "NDK path: $ANDROID_NDK"
+          ls -d "$ANDROID_NDK"
         env:
           ANDROID_NDK: /opt/android-ndk-r27c
 
