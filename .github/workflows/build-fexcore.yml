@@ -50,8 +50,8 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             git cmake ninja-build pkgconf ccache \
             clang llvm lld zstd \
-            libssl-dev python3-setuptools \
-            nasm
+            libssl-dev python3-setuptools libclang-17-dev \
+            clang-17 llvm-17 lld-17 nasm
 
       - name: Clone FEX
         run: |
@@ -67,13 +67,13 @@ jobs:
         run: |
           cd fex
           mkdir Build && cd Build
-          CC=clang CXX=clang++ cmake \
+          CC=clang-17 CXX=clang++-17 cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
             -DUSE_LINKER=lld \
             -DENABLE_LTO=${{ inputs.enable_lto && 'True' || 'False' }} \
             -DENABLE_ASSERTIONS=False \
-            -DBUILD_TESTING=False \
+            -DBUILD_TESTING=True \
             -DBUILD_THUNKS=${{ inputs.enable_thunks && 'True' || 'False' }} \
             -DBUILD_FEXCONFIG=False \
             -DENABLE_CCACHE=True \
