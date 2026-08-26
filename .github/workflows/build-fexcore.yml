@@ -45,33 +45,30 @@ jobs:
           git clone --recurse-submodules --depth 1 \
             https://github.com/FEX-Emu/FEX.git fex
 
+      - name: Setup cross-compile wrappers
+        run: |
+          mkdir -p /tmp/clang-cross
+          printf '#!/bin/bash\nexec clang-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang
+          printf '#!/bin/bash\nexec clang++-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"\n' > /tmp/clang-cross/aarch64-clang++
+          chmod +x /tmp/clang-cross/aarch64-clang /tmp/clang-cross/aarch64-clang++
+
       - name: Configure FEX (ARM64 cross-compile)
         run: |
-          cd fex
-          mkdir -p /tmp/clang-cross
-          cat > /tmp/clang-cross/aarch64-clang << 'EOF'
-#!/bin/bash
-exec clang-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"
-EOF
-          cat > /tmp/clang-cross/aarch64-clang++ << 'EOF'
-#!/bin/bash
-exec clang++-17 --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu "$@"
-EOF
-          chmod +x /tmp/clang-cross/aarch64-clang /tmp/clang-cross/aarch64-clang++
           export PATH="/tmp/clang-cross:$PATH"
+          cd fex
           mkdir Build && cd Build
-          cat > ../toolchain-aarch64.cmake << 'EOF'
-set(CMAKE_SYSTEM_NAME Linux)
-set(CMAKE_SYSTEM_PROCESSOR aarch64)
-set(CMAKE_C_COMPILER aarch64-clang)
-set(CMAKE_CXX_COMPILER aarch64-clang++)
-set(CMAKE_ASM_COMPILER aarch64-clang)
-set(CMAKE_AR llvm-ar-17)
-set(CMAKE_RANLIB llvm-ranlib-17)
-set(CMAKE_LINKER lld-17)
-set(CMAKE_C_FLAGS_INIT "-fuse-ld=lld-17")
-set(CMAKE_CXX_FLAGS_INIT "-fuse-ld=lld-17")
-EOF
+          cat > ../toolchain-aarch64.cmake << 'CTEOF'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+          set(CMAKE_C_COMPILER aarch64-clang)
+          set(CMAKE_CXX_COMPILER aarch64-clang++)
+          set(CMAKE_ASM_COMPILER aarch64-clang)
+          set(CMAKE_AR llvm-ar-17)
+          set(CMAKE_RANLIB llvm-ranlib-17)
+          set(CMAKE_LINKER lld-17)
+          set(CMAKE_C_FLAGS_INIT "-fuse-ld=lld-17")
+          set(CMAKE_CXX_FLAGS_INIT "-fuse-ld=lld-17")
+          CTEOF
           cmake \
             -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
