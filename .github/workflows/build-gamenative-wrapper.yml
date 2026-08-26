@@ -49,8 +49,7 @@ jobs:
             -DCMAKE_INSTALL_PREFIX=/usr \
             -G Ninja \
             ..
-          ninja -j$(nproc)
-          echo "Build directory contents:"
+          ninja -j$(nproc) -v
           find . -name "*.so"
 
       - name: Package as Winlator .tzst
