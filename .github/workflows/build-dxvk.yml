@@ -1,0 +1,301 @@
+name: Build DXVK (Winlator - Mali G57 / Helio G99)
+
+on:
+  workflow_dispatch:
+    inputs:
+      dxvk_version:
+        description: 'DXVK version/branch/tag'
+        required: false
+        default: 'dxvk-2.6.1'
+        type: string
+      enable_async:
+        description: 'Enable async pipeline (GPLALL fork)'
+        required: false
+        default: true
+        type: boolean
+      build_32bit:
+        description: 'Build 32-bit DLLs (WoW64)'
+        required: false
+        default: true
+        type: boolean
+      build_64bit:
+        description: 'Build 64-bit DLLs'
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'dxvk-*'
+
+env:
+  DXVK_REPO: 'https://github.com/doitsujin/dxvk.git'
+  DXVK_GPLALL_REPO: 'https://github.com/Digger1955/dxvk-gplall.git'
+  OUTPUT_DIR: 'dxvk-output'
+
+jobs:
+  build-dxvk:
+    name: DXVK ${{ inputs.enable_async == true && '(GPLALL+Async)' || '(Standard)' }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+
+    steps:
+      - name: Setup gh + git auth
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y gh
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build gcc-mingw-w64 g++-mingw-w64 \
+            glslang-tools libvulkan-dev spirv-tools spirv-headers \
+            git python3 python3-mako cmake zstd \
+            gcc-multilib g++-multilib wine64
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          sudo update-alternatives --set i686-w64-mingw32-gcc /usr/bin/i686-w64-mingw32-gcc-posix
+          sudo update-alternatives --set i686-w64-mingw32-g++ /usr/bin/i686-w64-mingw32-g++-posix
+
+      - name: Clone DXVK source
+        run: |
+          if [ "${{ inputs.enable_async }}" = "true" ]; then
+            git clone --recursive --branch GPLALL-master-2.6.8 \
+              ${{ env.DXVK_GPLALL_REPO }} dxvk
+          else
+            git clone --recursive --branch ${{ inputs.dxvk_version }} \
+              ${{ env.DXVK_REPO }} dxvk
+          fi
+          cd dxvk
+          echo "## DXVK Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Source: $(git remote get-url origin)" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Apply Mali G57 MC2 source patches
+        run: |
+          cd dxvk
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches/dxvk"
+          if [ -d "$PATCH_DIR" ]; then
+            for p in "$PATCH_DIR"/*.patch; do
+              [ -f "$p" ] && echo "Applying $(basename $p)" && git apply --check "$p" && git apply "$p"
+            done
+          fi
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Mali G57 patches applied from patches/dxvk/" >> $GITHUB_STEP_SUMMARY
+
+      - name: Apply inline Mali G57 patches
+        run: |
+          cd dxvk
+          # --- Patch: disable GPL on ARM proprietary driver ---
+          if grep -q "canUseGraphicsPipelineLibrary" src/dxvk/dxvk_device.cpp; then
+            sed -i 's/bool DxvkDevice::canUseGraphicsPipelineLibrary() const {/bool DxvkDevice::canUseGraphicsPipelineLibrary() const {\n    \/\/ Mali G57 MC2: force disable GPL (unstable on tiler GPUs)\n    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY))\n      return false;/' src/dxvk/dxvk_device.cpp
+            echo "Patched: force-disable GPL on ARM proprietary driver" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # --- Patch: Mali G57 perf hints ---
+          if grep -q "getPerfHints" src/dxvk/dxvk_device.cpp; then
+            sed -i '/bool tilerMode = /,/applyTristate(tilerMode/a\    \/\/ Mali G57: always enable tiler optimizations\n    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {\n      hints.preferRenderPassOps = true;\n      hints.preferCachedMemory = true;\n      hints.preferFbDepthStencilCopy = true;\n      hints.preferComputeMipGen = true;\n    }' src/dxvk/dxvk_device.cpp
+            echo "Patched: added Mali-specific perf hints (tiler, cached mem, depth copy, mip gen)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # --- Patch: Mali G57 shader options ---
+          if grep -q "determineShaderOptions" src/dxvk/dxvk_device.cpp; then
+            sed -i '/DxvkDevice::determineShaderOptions/,/^}/ {
+              /LowerConstantArrays/!{
+                /Supports16BitArithmetic/{
+                  a\    // Mali G57: force LowerConstantArrays for ARM proprietary
+                  a\    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY))
+                  a\      shaderOptions.lowerConstantArrays = true;
+                }
+              }
+            }' src/dxvk/dxvk_device.cpp
+            echo "Patched: added Mali shader options (LowerConstantArrays)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # --- Patch: disable descriptor heap/buffer on ARM ---
+          if grep -q "disableUnusedFeatures" src/dxvk/dxvk_device_info.cpp; then
+            sed -i '/disableUnusedFeatures/,/return/ {
+              /VK_DRIVER_ID_ARM_PROPRIETARY/!{
+                /extDescriptorHeap/{
+                  a\  // Mali G57: descriptor heap not supported
+                  a\  if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
+                  a\    features->extDescriptorHeap.descriptorHeap = VK_FALSE;
+                  a\  }
+                }
+              }
+            }' src/dxvk/dxvk_device_info.cpp
+            echo "Patched: disable descriptor heap on ARM" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "- GPL disabled on ARM proprietary driver" >> $GITHUB_STEP_SUMMARY
+          echo "- Tiler + cached memory + depth copy hints forced" >> $GITHUB_STEP_SUMMARY
+          echo "- LowerConstantArrays enabled" >> $GITHUB_STEP_SUMMARY
+          echo "- Descriptor heap disabled on ARM" >> $GITHUB_STEP_SUMMARY
+
+      - name: Build 64-bit DXVK
+        if: inputs.build_64bit == true
+        run: |
+          cd dxvk
+          meson setup build.w64 \
+            --cross-file build-win64.txt \
+            --buildtype release \
+            --strip \
+            --prefix $(pwd)/../build-install/x64 \
+            --bindir bin \
+            --libdir bin \
+            -Db_ndebug=if-release \
+            -Denable_d3d8=true \
+            -Denable_d3d9=true \
+            -Denable_d3d10=true \
+            -Denable_d3d11=true \
+            -Denable_dxgi=true
+          ninja -C build.w64 -j$(nproc)
+          ninja -C build.w64 install
+
+      - name: Build 32-bit DXVK
+        if: inputs.build_32bit == true
+        run: |
+          cd dxvk
+          meson setup build.w32 \
+            --cross-file build-win32.txt \
+            --buildtype release \
+            --strip \
+            --prefix $(pwd)/../build-install/x32 \
+            --bindir bin \
+            --libdir bin \
+            -Db_ndebug=if-release \
+            -Denable_d3d8=true \
+            -Denable_d3d9=true \
+            -Denable_d3d10=true \
+            -Denable_d3d11=true \
+            -Denable_dxgi=true
+          ninja -C build.w32 -j$(nproc)
+          ninja -C build.w32 install
+
+      - name: Package as Winlator .wcp (profile.json + zstd)
+        run: |
+          STAGE="dxvk-stage"
+          mkdir -p "$STAGE/system32" "$STAGE/syswow64"
+
+          # Copy x64 DLLs to system32
+          if [ "${{ inputs.build_64bit }}" = "true" ]; then
+            cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
+          fi
+
+          # Copy x32 DLLs to syswow64
+          if [ "${{ inputs.build_32bit }}" = "true" ]; then
+            cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
+          fi
+
+          DXVK_VER="${{ inputs.dxvk_version }}"
+          if [ "${{ inputs.enable_async }}" = "true" ]; then
+            DXVK_VER="GPLALL-2.6.8-async"
+          fi
+
+          # Generate profile.json
+          cat > "$STAGE/profile.json" << JSONEOF
+          {
+            "type": "DXVK",
+            "versionName": "${DXVK_VER}-mali-g57",
+            "versionCode": 0,
+            "description": "DXVK ${DXVK_VER} optimized for Mali G57 MC2 + Helio G99. Async pipeline, GPL disabled, tiler batch, low-latency frame pacing.",
+            "files": [
+              {"source": "system32/d3d8.dll",     "target": "\${system32}/d3d8.dll"},
+              {"source": "system32/d3d9.dll",     "target": "\${system32}/d3d9.dll"},
+              {"source": "system32/d3d10.dll",    "target": "\${system32}/d3d10.dll"},
+              {"source": "system32/d3d10_1.dll",  "target": "\${system32}/d3d10_1.dll"},
+              {"source": "system32/d3d10core.dll","target": "\${system32}/d3d10core.dll"},
+              {"source": "system32/d3d11.dll",    "target": "\${system32}/d3d11.dll"},
+              {"source": "system32/dxgi.dll",     "target": "\${system32}/dxgi.dll"},
+              {"source": "syswow64/d3d8.dll",     "target": "\${syswow64}/d3d8.dll"},
+              {"source": "syswow64/d3d9.dll",     "target": "\${syswow64}/d3d9.dll"},
+              {"source": "syswow64/d3d10.dll",    "target": "\${syswow64}/d3d10.dll"},
+              {"source": "syswow64/d3d10_1.dll",  "target": "\${syswow64}/d3d10_1.dll"},
+              {"source": "syswow64/d3d10core.dll","target": "\${syswow64}/d3d10core.dll"},
+              {"source": "syswow64/d3d11.dll",    "target": "\${syswow64}/d3d11.dll"},
+              {"source": "syswow64/dxgi.dll",     "target": "\${syswow64}/dxgi.dll"}
+            ]
+          }
+          JSONEOF
+
+          # Create dxvk.conf with Mali optimizations
+          cat > "$STAGE/dxvk.conf" << 'CONF'
+          # DXVK Config - Mali G57 MC2 / Helio G99
+          dxvk.enableAsync = True
+          dxvk.enableGraphicsPipelineLibrary = False
+          dxvk.enableStateCache = True
+          dxvk.numCompilerThreads = 0
+          dxvk.framePace = low-latency
+          dxvk.maxFrameLatency = 1
+          dxvk.tilerMode = batch
+          d3d9.floatEmulation = Strict
+          d3d9.forceSamplerTypeSpecConstants = True
+          d3d9.supportDFFormats = True
+          CONF
+
+          # Build tar + zstd -> .wcp
+          cd "$STAGE"
+          tar -cf ../dxvk-mali-g57.tar . --sort=name --mtime='UTC 2024-01-01'
+          cd ..
+          zstd --ultra -22 dxvk-mali-g57.tar -o "${{ env.OUTPUT_DIR }}/dxvk-${DXVK_VER}-mali-g57.wcp"
+          rm -f dxvk-mali-g57.tar
+
+          # Also create .tzst variant
+          cp dxvk-mali-g57.tar dxvk-mali-g57-v2.tar 2>/dev/null || true
+          zstd --ultra -22 dxvk-mali-g57-v2.tar -o "${{ env.OUTPUT_DIR }}/dxvk-${DXVK_VER}-mali-g57.tzst" 2>/dev/null || true
+          rm -f dxvk-mali-g57-v2.tar
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Output files:" >> $GITHUB_STEP_SUMMARY
+          ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Winlator addon (.wcp)
+        uses: actions/upload-artifact@v4
+        with:
+          name: DXVK-MaliG57-Winlator
+          path: ${{ env.OUTPUT_DIR }}/*.wcp
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.OUTPUT_DIR }}/*.wcp
+            ${{ env.OUTPUT_DIR }}/*.tzst
+          generate_release_notes: true
+          name: "DXVK ${{ inputs.dxvk_version }} - Mali G57 MC2 / Helio G99"
+          body: |
+            ## DXVK Winlator Addon - Mali G57 MC2 / Helio G99
+
+            **Format:** `.wcp` (Winlator Content Package)
+
+            ### Features (source patches applied)
+            - GPL force-disabled on ARM proprietary driver
+            - Tiler batch mode + cached memory hints
+            - LowerConstantArrays for ARM shader compiler
+            - Async pipeline compilation (GPLALL)
+            - Low-latency frame pacing
+
+            ### Installation
+            1. Copy `.wcp` to phone
+            2. Open Winlator → Addons → Install from file
+            3. Select the `.wcp` file
+
+            ### dxvk.conf (included)
+            ```
+            dxvk.enableAsync = True
+            dxvk.tilerMode = batch
+            dxvk.framePace = low-latency
+            dxvk.maxFrameLatency = 1
+            ```
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

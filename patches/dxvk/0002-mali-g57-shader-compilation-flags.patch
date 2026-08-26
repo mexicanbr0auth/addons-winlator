@@ -1,0 +1,37 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Winlator-Mali <build@winlator-mali>
+Subject: [PATCH] DXVK: Mali G57 shader compilation flags
+
+Force-enable LowerConstantArrays for ARM proprietary driver.
+The Mali shader compiler handles constant arrays differently
+from desktop GPUs, requiring this lowering pass.
+
+Also set LowerSinCos for Mali precision workarounds.
+---
+ src/dxvk/dxvk_device.cpp | 12 ++++++++++++
+ 1 file changed, 12 insertions(+)
+
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 1234567..abcdefg 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -450,6 +450,18 @@ namespace dxvk {
+       shaderOptions.lowerConstantArrays = true;
+     }
+     
++    // Mali G57 MC2: force LowerConstantArrays for ARM proprietary
++    // Mali's shader compiler handles constant arrays differently
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      shaderOptions.lowerConstantArrays = true;
++    }
++    
++    // Mali G57: LowerSinCos for precision
++    // Mali G57 has lower precision for sin/cos than desktop GPUs
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      shaderOptions.lowerSinCos = true;
++    }
++    
+     // ... existing shader options ...
+   }
+-- 
+2.43.0

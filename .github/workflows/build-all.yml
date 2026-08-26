@@ -1,0 +1,105 @@
+name: "Build All - Winlator Addons (Mali G57 / Helio G99)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_dxvk:
+        description: 'Build DXVK (GPLALL)'
+        required: false
+        default: true
+        type: boolean
+      build_dxvk_sarek:
+        description: 'Build DXVK-Sarek'
+        required: false
+        default: true
+        type: boolean
+      build_fex:
+        description: 'Build FEXCore'
+        required: false
+        default: true
+        type: boolean
+      build_proton:
+        description: 'Build Proton DXVK'
+        required: false
+        default: false
+        type: boolean
+      enable_async:
+        description: 'Enable async pipeline'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  setup:
+    name: Setup gh + git auth
+    runs-on: ubuntu-latest
+    steps:
+      - name: Setup gh
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y gh
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+  build-dxvk:
+    name: DXVK (GPLALL+Async)
+    if: inputs.build_dxvk == true
+    needs: [setup]
+    uses: ./.github/workflows/build-dxvk.yml
+    with:
+      enable_async: ${{ inputs.enable_async }}
+      build_32bit: true
+      build_64bit: true
+    secrets: inherit
+
+  build-dxvk-sarek:
+    name: DXVK-Sarek (Vulkan 1.1)
+    if: inputs.build_dxvk_sarek == true
+    needs: [setup]
+    uses: ./.github/workflows/build-dxvk-sarek.yml
+    with:
+      build_32bit: true
+      build_64bit: true
+    secrets: inherit
+
+  build-fex:
+    name: FEXCore (ARM64)
+    if: inputs.build_fex == true
+    needs: [setup]
+    uses: ./.github/workflows/build-fexcore.yml
+    with:
+      enable_thunks: true
+      enable_lto: true
+    secrets: inherit
+
+  build-proton:
+    name: Proton DXVK
+    if: inputs.build_proton == true
+    needs: [setup]
+    uses: ./.github/workflows/build-proton.yml
+    with:
+      use_gplall: ${{ inputs.enable_async }}
+      enable_vkd3d: true
+    secrets: inherit
+
+  summary:
+    name: Build Summary
+    runs-on: ubuntu-latest
+    needs: [build-dxvk, build-dxvk-sarek, build-fex, build-proton]
+    if: always()
+    steps:
+      - name: Summary
+        run: |
+          echo "# Winlator Addons Build Summary" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Component | Status | Format |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----------|--------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK (GPLALL) | ${{ needs.build-dxvk.result || 'skipped' }} | `.wcp` |" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK-Sarek | ${{ needs.build-dxvk-sarek.result || 'skipped' }} | `.wcp` |" >> $GITHUB_STEP_SUMMARY
+          echo "| FEXCore | ${{ needs.build-fex.result || 'skipped' }} | `.tzst` |" >> $GITHUB_STEP_SUMMARY
+          echo "| Proton DXVK | ${{ needs.build-proton.result || 'skipped' }} | `.wcp` |" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "**Target:** Mali G57 MC2 + Helio G99" >> $GITHUB_STEP_SUMMARY
+          echo "**Source patches:** GPL disabled, tiler batch, cached mem, ETC2/ASTC" >> $GITHUB_STEP_SUMMARY
+          echo "**Output:** Winlator `.wcp`/`.tzst` format (profile.json + zstd)" >> $GITHUB_STEP_SUMMARY

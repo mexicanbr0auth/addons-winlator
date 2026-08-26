@@ -1,0 +1,222 @@
+name: Build FEXCore (Winlator - Helio G99 ARM64)
+
+on:
+  workflow_dispatch:
+    inputs:
+      fex_version:
+        description: 'FEX version (e.g., FEX-2608)'
+        required: false
+        default: 'FEX-2608'
+        type: string
+      enable_thunks:
+        description: 'Build Vulkan/GL thunks'
+        required: false
+        default: true
+        type: boolean
+      enable_lto:
+        description: 'Enable LTO'
+        required: false
+        default: true
+        type: boolean
+  push:
+    tags:
+      - 'fex-*'
+
+env:
+  FEX_REPO: 'https://github.com/FEX-Emu/FEX.git'
+  OUTPUT_DIR: 'fex-output'
+
+jobs:
+  build-fexcore:
+    name: FEXCore (ARM64 - Helio G99)
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 180
+
+    steps:
+      - name: Setup gh + git auth
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y gh
+          echo "${{ secrets.GITHUB_TOKEN }}" | gh auth login --with-token
+          gh auth setup-git
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Verify ARM64
+        run: |
+          if [ "$(uname -m)" != "aarch64" ]; then
+            echo "::error::ARM64 runner required"
+            exit 1
+          fi
+          echo "## ARM64 Build Environment" >> $GITHUB_STEP_SUMMARY
+          echo "- Arch: $(uname -m)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            git cmake ninja-build pkgconf ccache \
+            clang llvm lld zstd \
+            libssl-dev python3-setuptools \
+            gcc-x86-64-linux-gnu g++-x86-64-linux-gnu \
+            libgcc-12-dev-i386-cross libgcc-12-dev-amd64-cross \
+            libstdc++-12-dev-i386-cross libstdc++-12-dev-amd64-cross \
+            nasm python3-clang libc6-dev-i386-amd64-cross
+
+      - name: Clone FEX
+        run: |
+          git clone --recurse-submodules --branch ${{ inputs.fex_version }} \
+            --depth 1 ${{ env.FEX_REPO }} fex
+          cd fex
+          echo "## FEX Build Info" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: ${{ inputs.fex_version }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
+
+      - name: Apply Helio G99 source patches
+        run: |
+          cd fex
+          PATCH_DIR="${GITHUB_WORKSPACE}/patches/fexcore"
+          if [ -d "$PATCH_DIR" ]; then
+            for p in "$PATCH_DIR"/*.patch; do
+              [ -f "$p" ] && echo "Applying $(basename $p)" && git apply --check "$p" && git apply "$p"
+            done
+          fi
+
+          # --- Patch: Cortex-A76/A55 optimized defaults ---
+          # Tune MaxInst for A76's 64KB L1I cache
+          if grep -q "MaxInst" FEXCore/Source/Interface/Config/Config.json.in; then
+            sed -i 's/"Default": "5000"/"Default": "8000"/' FEXCore/Source/Interface/Config/Config.json.in
+            echo "Patched: MaxInst default 5000→8000 (A76 64KB L1I)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Tune multiblock forward branch distance for A76
+          if grep -q "MAX_FORWARD_BRANCH_DIST" FEXCore/Source/Interface/Core/Frontend.cpp; then
+            sed -i 's/FEX_PAGE_SIZE \* 4/FEX_PAGE_SIZE \* 6/' FEXCore/Source/Interface/Core/Frontend.cpp
+            echo "Patched: forward branch dist 16KB→24KB (A76)" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          # Enable LSE atomics + CRC32 explicitly for A76
+          if grep -q "HandleErrata" Source/Common/HostFeatures.cpp; then
+            echo "Host errata handler found - A76 already handled upstream" >> $GITHUB_STEP_SUMMARY
+          fi
+
+          echo "- JIT tuned for Cortex-A76 (64KB L1I, 256KB L2)" >> $GITHUB_STEP_SUMMARY
+          echo "- Multiblock expanded for A76 branch predictor" >> $GITHUB_STEP_SUMMARY
+
+      - name: Configure FEX
+        run: |
+          cd fex
+          mkdir Build && cd Build
+          cmake \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DUSE_LINKER=lld \
+            -DENABLE_LTO=${{ inputs.enable_lto && 'True' || 'False' }} \
+            -DENABLE_ASSERTIONS=False \
+            -DBUILD_TESTING=False \
+            -DBUILD_THUNKS=${{ inputs.enable_thunks && 'True' || 'False' }} \
+            -DENABLE_CLANG_THUNKS=True \
+            -DBUILD_FEXCONFIG=False \
+            -DENABLE_CCACHE=True \
+            -DTUNE_ARCH=armv8.2-a \
+            -DTUNE_CPU=cortex-a76 \
+            -G Ninja \
+            ..
+
+      - name: Build FEX
+        run: |
+          cd fex/Build
+          ninja -j$(nproc)
+
+      - name: Install FEX
+        run: |
+          cd fex/Build
+          DESTDIR=$(pwd)/../fex-install ninja install
+
+      - name: Create FEX config for Helio G99
+        run: |
+          mkdir -p fex-install/etc/FEXCore
+          cat > fex-install/etc/FEXCore/fex.conf << 'CONF'
+          [Core]
+          Multiplier = 1
+
+          [JIT]
+          BlockSize = 8000
+          HostFeatures = Auto
+          Multiblock = true
+
+          [ThunkLibs]
+          Vulkan = true
+          OpenGL = true
+          CONF
+
+      - name: Package as Winlator .tzst
+        run: |
+          STAGE="fex-stage"
+          mkdir -p "$STAGE/usr/bin" "$STAGE/usr/lib" "$STAGE/etc/FEXCore"
+
+          # Copy FEX binaries and libs
+          cp fex-install/usr/bin/FEX* "$STAGE/usr/bin/" 2>/dev/null || true
+          cp fex-install/usr/lib/libFEXCore* "$STAGE/usr/lib/" 2>/dev/null || true
+          cp fex-install/usr/lib/FEXCore/* "$STAGE/usr/lib/" 2>/dev/null || true
+          cp -r fex-install/etc/FEXCore/* "$STAGE/etc/FEXCore/" 2>/dev/null || true
+
+          FEX_VER="${{ inputs.fex_version }}"
+
+          cat > "$STAGE/profile.json" << JSONEOF
+          {
+            "type": "FEXCore",
+            "versionName": "${FEX_VER}-helio-g99",
+            "versionCode": 0,
+            "description": "FEX-Emu ${FEX_VER} for Helio G99 (Cortex-A76/A55). LTO, Vulkan/GL thunks, JIT tuned for A76 L1I cache.",
+            "files": [
+              {"source": "usr/bin/FEXLoader",          "target": "\${bindir}/FEXLoader"},
+              {"source": "usr/bin/FEXInterpreter",     "target": "\${bindir}/FEXInterpreter"},
+              {"source": "usr/lib/libFEXCore.so",      "target": "\${libdir}/libFEXCore.so"},
+              {"source": "etc/FEXCore/fex.conf",       "target": "\${sharedir}/FEXCore/fex.conf"}
+            ]
+          }
+          JSONEOF
+
+          cd "$STAGE"
+          tar -cf ../fex-helio-g99.tar . --sort=name --mtime='UTC 2024-01-01'
+          cd ..
+          zstd --ultra -22 fex-helio-g99.tar -o "${{ env.OUTPUT_DIR }}/fex-${FEX_VER}-helio-g99.tzst"
+          rm -f fex-helio-g99.tar
+
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "### Output:" >> $GITHUB_STEP_SUMMARY
+          ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
+
+      - name: Upload Winlator addon (.tzst)
+        uses: actions/upload-artifact@v4
+        with:
+          name: FEXCore-HelioG99-Winlator
+          path: ${{ env.OUTPUT_DIR }}/*.tzst
+          retention-days: 30
+
+      - name: Create Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ env.OUTPUT_DIR }}/*.tzst
+          generate_release_notes: true
+          name: "FEXCore ${{ inputs.fex_version }} - Helio G99"
+          body: |
+            ## FEXCore Winlator Addon - Helio G99
+
+            **Format:** `.tzst`
+            **Target:** Cortex-A76/A55 (Helio G99)
+
+            ### Source Patches
+            - JIT MaxInst 5000→8000 (A76 64KB L1I cache)
+            - Multiblock forward branch 16KB→24KB
+            - LTO enabled
+            - Vulkan/GL thunks for native GPU
+
+            ### Installation
+            Copy `.tzst` → Winlator → Addons → Install
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

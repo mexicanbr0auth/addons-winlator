@@ -1,0 +1,66 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Winlator-Mali <build@winlator-mali>
+Subject: [PATCH] DXVK: Mali G57 MC2 force-disable GPL + perf hints
+
+Force-disable Graphics Pipeline Library on ARM proprietary driver
+(Mali G57 MC2). GPL is unstable on tiler-based mobile GPUs.
+
+Also enable tiler-specific performance hints:
+- preferRenderPassOps: render pass friendly submission
+- preferCachedMemory: UMA optimized allocations
+- preferFbDepthStencilCopy: faster depth/stencil copies
+- preferComputeMipGen: compute-based mip generation
+
+Target: Mali G57 MC2 + Helio G99
+---
+ src/dxvk/dxvk_device.cpp     | 12 ++++++++++++
+ src/dxvk/dxvk_device_info.cpp |  6 ++++++
+ 2 files changed, 18 insertions(+)
+
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 1234567..abcdefg 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -130,6 +130,12 @@ namespace dxvk {
+   
+   bool DxvkDevice::canUseGraphicsPipelineLibrary() const {
++    // Mali G57 MC2: force-disable GPL (unstable on tiler GPUs)
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      return false;
++    }
++    
+     return m_features.extGraphicsPipelineLibrary.graphicsPipelineLibrary
+         && m_properties.extGraphicsPipelineLibrary.graphicsPipelineLibraryIndependentInterpolationDecoration
+         && m_options.enableGraphicsPipelineLibrary != Tristate::False;
+@@ -420,6 +426,12 @@ namespace dxvk {
+     
+     applyTristate(tilerMode, m_options.tilerMode);
+     hints.preferRenderPassOps = tilerMode;
+     hints.preferCachedMemory = tilerMode;
++    
++    // Mali G57 MC2: always force tiler optimizations
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      hints.preferRenderPassOps = true;
++      hints.preferCachedMemory = true;
++      hints.preferFbDepthStencilCopy = true;
++      hints.preferComputeMipGen = true;
++    }
+   }
+   
+diff --git a/src/dxvk/dxvk_device_info.cpp b/src/dxvk/dxvk_device_info.cpp
+index 1234567..abcdefg 100644
+--- a/src/dxvk/dxvk_device_info.cpp
++++ b/src/dxvk/dxvk_device_info.cpp
+@@ -380,6 +380,12 @@ namespace dxvk {
+     
+     // Disable descriptor heap on drivers that don't support it well
++    // Mali G57 MC2: descriptor heap not supported on ARM proprietary
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      features->extDescriptorHeap.descriptorHeap = VK_FALSE;
++      features->extDescriptorBuffer.descriptorBuffer = VK_FALSE;
++    }
++    
+     // ... existing checks ...
+   }
+-- 
+2.43.0

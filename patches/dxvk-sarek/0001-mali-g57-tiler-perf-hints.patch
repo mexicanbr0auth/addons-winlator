@@ -1,0 +1,33 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: Winlator-Mali <build@winlator-mali>
+Subject: [PATCH] DXVK-Sarek: Mali G57 MC2 tiler perf hints
+
+Enable Mali-specific performance optimizations in DXVK-Sarek.
+Same tiler hints as upstream DXVK but adapted for Sarek's 1.10.x codebase.
+---
+ src/dxvk/dxvk_device.cpp | 10 ++++++++++
+ 1 file changed, 10 insertions(+)
+
+diff --git a/src/dxvk/dxvk_device.cpp b/src/dxvk/dxvk_device.cpp
+index 1234567..abcdefg 100644
+--- a/src/dxvk/dxvk_device.cpp
++++ b/src/dxvk/dxvk_device.cpp
+@@ -350,6 +350,16 @@ namespace dxvk {
+     
+     applyTristate(tilerMode, m_options.tilerMode);
+     hints.preferRenderPassOps = tilerMode;
+     hints.preferCachedMemory = tilerMode;
++    
++    // Mali G57 MC2: force tiler optimizations
++    // Sarek targets Vulkan 1.1/1.2 for mobile GPUs
++    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {
++      hints.preferRenderPassOps = true;
++      hints.preferCachedMemory = true;
++      hints.preferFbDepthStencilCopy = true;
++      // Mali tiler benefits from batched render passes
++      hints.preferComputeMipGen = true;
++    }
+   }
+   
+-- 
+2.43.0
