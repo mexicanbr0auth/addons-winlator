@@ -53,7 +53,8 @@ jobs:
             libssl-dev python3-setuptools libclang-17-dev \
             libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
-            libwayland-dev wayland-protocols nasm
+            libwayland-dev wayland-protocols nasm \
+            libc6-dev libgcc-14-dev libstdc++-14-dev
 
       - name: Clone FEX
         run: |
