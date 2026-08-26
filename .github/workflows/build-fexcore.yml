@@ -73,7 +73,8 @@ jobs:
           CC=clang-17 CXX=clang++-17 cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
-            -DUSE_LINKER=lld \
+            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/" \
+            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/" \
             -DENABLE_LTO=${{ inputs.enable_lto && 'True' || 'False' }} \
             -DENABLE_ASSERTIONS=False \
             -DBUILD_TESTING=True \
