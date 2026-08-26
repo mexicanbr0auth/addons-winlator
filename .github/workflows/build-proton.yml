@@ -3,18 +3,8 @@ name: Build Proton (Winlator - Mali G57 / Helio G99)
 on:
   workflow_dispatch:
     inputs:
-      proton_branch:
-        description: 'Proton branch'
-        required: false
-        default: 'proton_9.0'
-        type: string
       use_gplall:
         description: 'Use DXVK-GPLALL (async)'
-        required: false
-        default: true
-        type: boolean
-      enable_vkd3d:
-        description: 'Build VKD3D-Proton (D3D12)'
         required: false
         default: true
         type: boolean
@@ -23,16 +13,15 @@ on:
       - 'proton-*'
 
 env:
-  PROTON_REPO: 'https://github.com/ValveSoftware/Proton.git'
+  DXVK_REPO: 'https://github.com/doitsujin/dxvk.git'
   DXVK_GPLALL_REPO: 'https://github.com/Digger1955/dxvk-gplall.git'
-  SDK_IMAGE: 'registry.gitlab.steamos.cloud/proton/steamrt4/sdk/x86_64:4.0.20260331.220802-0'
   OUTPUT_DIR: 'proton-output'
 
 jobs:
   build-proton:
-    name: Proton ${{ inputs.proton_branch }} (Mali G57)
+    name: Proton DXVK (Mali G57)
     runs-on: ubuntu-24.04
-    timeout-minutes: 360
+    timeout-minutes: 180
 
     steps:
       - name: Setup gh + git auth
@@ -46,127 +35,106 @@ jobs:
       - name: Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install Docker
+      - name: Install build dependencies
         run: |
+          sudo dpkg --add-architecture i386
           sudo apt-get update -qq
-          sudo apt-get install -y --no-install-recommends docker.io wget rsync git python3 zstd
-          sudo systemctl start docker
+          sudo apt-get install -y --no-install-recommends \
+            meson ninja-build gcc-mingw-w64 g++-mingw-w64 \
+            glslang-tools libvulkan-dev spirv-tools spirv-headers \
+            git python3 python3-mako cmake zstd \
+            gcc-multilib g++-multilib
+          sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
+          sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
+          sudo update-alternatives --set i686-w64-mingw32-gcc /usr/bin/i686-w64-mingw32-gcc-posix
+          sudo update-alternatives --set i686-w64-mingw32-g++ /usr/bin/i686-w64-mingw32-g++-posix
 
-      - name: Clone Proton
+      - name: Clone DXVK
         run: |
-          git clone --recurse-submodules --branch ${{ inputs.proton_branch }} \
-            --depth 1 ${{ env.PROTON_REPO }} proton
-          cd proton
-          echo "## Proton Build Info" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: ${{ inputs.proton_branch }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
-
-      - name: Patch DXVK-GPLALL
-        if: inputs.use_gplall == true
-        run: |
-          cd proton
-          rm -rf dxvk
-          git clone --recursive --branch GPLALL-master-2.6.8 \
-            ${{ env.DXVK_GPLALL_REPO }} dxvk
-          echo "### DXVK-GPLALL patched" >> $GITHUB_STEP_SUMMARY
-
-      - name: Apply Mali G57 Wine/DXVK source patches
-        run: |
-          cd proton
-
-          # --- Patch: Wine adapter_vk.c - enable features Mali G57 supports ---
-          if [ -f "wine/dlls/wined3d/adapter_vk.c" ]; then
-            # Re-enable ETC2/ASTC texture compression (Mali supports both)
-            sed -i 's/features->textureCompressionETC2 = VK_FALSE;/\/\/ Mali G57: ETC2 supported\n\/\/ features->textureCompressionETC2 = VK_FALSE;/' wine/dlls/wined3d/adapter_vk.c
-            sed -i 's/features->textureCompressionASTC_LDR = VK_FALSE;/\/\/ Mali G57: ASTC supported\n\/\/ features->textureCompressionASTC_LDR = VK_FALSE;/' wine/dlls/wined3d/adapter_vk.c
-            echo "Patched adapter_vk.c: enabled ETC2+ASTC for Mali" >> $GITHUB_STEP_SUMMARY
+          if [ "${{ inputs.use_gplall }}" = "true" ]; then
+            git clone --recursive --branch GPLALL-master-2.6.8 \
+              ${{ env.DXVK_GPLALL_REPO }} dxvk
+          else
+            git clone --recursive --branch dxvk-2.6.1 \
+              ${{ env.DXVK_REPO }} dxvk
           fi
+          cd dxvk
+          echo "## Proton DXVK Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Source: $(git remote get-url origin)" >> $GITHUB_STEP_SUMMARY
+          echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
 
-          # --- Patch: Wine wined3d_private.h - add ARM Mali GPU IDs ---
-          if [ -f "wine/dlls/wined3d/wined3d_private.h" ]; then
-            grep -q "CARD_ARM_MALI_G57" wine/dlls/wined3d/wined3d_private.h || {
-              sed -i '/enum wined3d_pci_device/,/^};/ {
-                /CARD_NVIDIA_G80;/a\    CARD_ARM_MALI_G57 = 0x0001,
-              }' wine/dlls/wined3d/wined3d_private.h
-              echo "Patched wined3d_private.h: added CARD_ARM_MALI_G57" >> $GITHUB_STEP_SUMMARY
-            }
-          fi
-
-          # --- Patch: Wine directx.c - add Mali G57 to GPU table ---
-          if [ -f "wine/dlls/wined3d/directx.c" ]; then
-            grep -q "Mali-G57" wine/dlls/wined3d/directx.c || {
-              sed -i '/gpu_description_table\[\]/,/^\};/ {
-                /CARD_NVIDIA_G80.*NVIDIA/a\    {HW_VENDOR_ARM, CARD_ARM_MALI_G57, "ARM Mali-G57", DRIVER_ARM_MALI, 2048},
-              }' wine/dlls/wined3d/directx.c
-              echo "Patched directx.c: added Mali G57 to GPU table" >> $GITHUB_STEP_SUMMARY
-            }
-          fi
-
-          echo "- Wine: ETC2/ASTC re-enabled for Mali G57" >> $GITHUB_STEP_SUMMARY
-          echo "- Wine: ARM Mali GPU ID added to driver table" >> $GITHUB_STEP_SUMMARY
-
-      - name: Build Proton (Docker)
+      - name: Build 64-bit
         run: |
-          cd proton
-          echo "Starting Proton build via Docker..."
-          echo "This may take a long time." >> $GITHUB_STEP_SUMMARY
+          cd dxvk
+          meson setup build.w64 \
+            --cross-file build-win64.txt \
+            --buildtype release \
+            --strip \
+            --prefix $(pwd)/../build-install/x64 \
+            --bindir bin --libdir bin \
+            -Db_ndebug=if-release \
+            -Denable_d3d8=true -Denable_d3d9=true \
+            -Denable_d3d10=true -Denable_d3d11=true \
+            -Denable_dxgi=true
+          ninja -C build.w64 -j$(nproc)
+          ninja -C build.w64 install
 
-          make \
-            SRCDIR=$(pwd) \
-            CCACHE=1 \
-            all 2>&1 | tee ../proton-build.log || {
-              echo "::warning::Full Proton build failed, attempting component builds..."
-              make dxvk 2>&1 | tee -a ../proton-build.log || true
-              make vkd3d-proton 2>&1 | tee -a ../proton-build.log || true
-              make wine 2>&1 | tee -a ../proton-build.log || true
-            }
-
-      - name: Package DXVK as Winlator .wcp
+      - name: Build 32-bit
         run: |
-          STAGE="dxvk-stage"
+          cd dxvk
+          meson setup build.w32 \
+            --cross-file build-win32.txt \
+            --buildtype release \
+            --strip \
+            --prefix $(pwd)/../build-install/x32 \
+            --bindir bin --libdir bin \
+            -Db_ndebug=if-release \
+            -Denable_d3d8=true -Denable_d3d9=true \
+            -Denable_d3d10=true -Denable_d3d11=true \
+            -Denable_dxgi=true
+          ninja -C build.w32 -j$(nproc)
+          ninja -C build.w32 install
+
+      - name: Package as Winlator .wcp
+        run: |
+          STAGE="proton-dxvk-stage"
           mkdir -p "$STAGE/system32" "$STAGE/syswow64"
 
-          # Extract DXVK DLLs from Proton build
-          if [ -d "proton/dist/files/lib/wine/dxvk" ]; then
-            cp proton/dist/files/lib/wine/dxvk/x86_64-windows/*.dll "$STAGE/system32/" 2>/dev/null || true
-            cp proton/dist/files/lib/wine/dxvk/i386-windows/*.dll "$STAGE/syswow64/" 2>/dev/null || true
-          elif [ -d "proton/dxvk/build.w64/bin" ]; then
-            cp proton/dxvk/build.w64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
-            cp proton/dxvk/build.w32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
+          cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
+          cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
+
+          DXVK_VER="proton-gplall-2.6.8"
+          if [ "${{ inputs.use_gplall }}" != "true" ]; then
+            DXVK_VER="proton-dxvk-2.6.1"
           fi
 
-          DXVK_VER="proton-${{ inputs.proton_branch }}"
-          if [ "${{ inputs.use_gplall }}" = "true" ]; then
-            DXVK_VER="proton-gplall-${{ inputs.proton_branch }}"
-          fi
-
-          cat > "$STAGE/profile.json" << JSONEOF
+          cat > "$STAGE/profile.json" << 'EOF'
           {
             "type": "DXVK",
-            "versionName": "${DXVK_VER}-mali-g57",
+            "versionName": "PLACEHOLDER_VER-mali-g57",
             "versionCode": 0,
-            "description": "DXVK from Proton ${{ inputs.proton_branch }} with GPLALL async, optimized for Mali G57 MC2 + Helio G99.",
+            "description": "Proton DXVK for Mali G57 MC2 + Helio G99. Async, tiler batch, low-latency.",
             "files": [
-              {"source": "system32/d3d8.dll",     "target": "\${system32}/d3d8.dll"},
-              {"source": "system32/d3d9.dll",     "target": "\${system32}/d3d9.dll"},
-              {"source": "system32/d3d10.dll",    "target": "\${system32}/d3d10.dll"},
-              {"source": "system32/d3d10_1.dll",  "target": "\${system32}/d3d10_1.dll"},
-              {"source": "system32/d3d10core.dll","target": "\${system32}/d3d10core.dll"},
-              {"source": "system32/d3d11.dll",    "target": "\${system32}/d3d11.dll"},
-              {"source": "system32/dxgi.dll",     "target": "\${system32}/dxgi.dll"},
-              {"source": "syswow64/d3d8.dll",     "target": "\${syswow64}/d3d8.dll"},
-              {"source": "syswow64/d3d9.dll",     "target": "\${syswow64}/d3d9.dll"},
-              {"source": "syswow64/d3d10.dll",    "target": "\${syswow64}/d3d10.dll"},
-              {"source": "syswow64/d3d10_1.dll",  "target": "\${syswow64}/d3d10_1.dll"},
-              {"source": "syswow64/d3d10core.dll","target": "\${syswow64}/d3d10core.dll"},
-              {"source": "syswow64/d3d11.dll",    "target": "\${syswow64}/d3d11.dll"},
-              {"source": "syswow64/dxgi.dll",     "target": "\${syswow64}/dxgi.dll"}
+              {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
+              {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
+              {"source": "system32/d3d10.dll", "target": "${system32}/d3d10.dll"},
+              {"source": "system32/d3d10_1.dll", "target": "${system32}/d3d10_1.dll"},
+              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
+              {"source": "system32/d3d11.dll", "target": "${system32}/d3d11.dll"},
+              {"source": "system32/dxgi.dll", "target": "${system32}/dxgi.dll"},
+              {"source": "syswow64/d3d8.dll", "target": "${syswow64}/d3d8.dll"},
+              {"source": "syswow64/d3d9.dll", "target": "${syswow64}/d3d9.dll"},
+              {"source": "syswow64/d3d10.dll", "target": "${syswow64}/d3d10.dll"},
+              {"source": "syswow64/d3d10_1.dll", "target": "${syswow64}/d3d10_1.dll"},
+              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
+              {"source": "syswow64/d3d11.dll", "target": "${syswow64}/d3d11.dll"},
+              {"source": "syswow64/dxgi.dll", "target": "${syswow64}/dxgi.dll"}
             ]
           }
-          JSONEOF
+          EOF
+          sed -i "s/PLACEHOLDER_VER/${DXVK_VER}/" "$STAGE/profile.json"
 
-          cat > "$STAGE/dxvk.conf" << 'CONF'
-          # Proton DXVK - Mali G57 MC2 / Helio G99
+          cat > "$STAGE/dxvk.conf" << 'DXEOF'
           dxvk.enableAsync = True
           dxvk.enableGraphicsPipelineLibrary = False
           dxvk.enableStateCache = True
@@ -175,31 +143,24 @@ jobs:
           dxvk.maxFrameLatency = 1
           dxvk.tilerMode = batch
           d3d9.floatEmulation = Strict
-          CONF
+          DXEOF
 
           cd "$STAGE"
-          tar -cf ../proton-dxvk.tar . --sort=name --mtime='UTC 2024-01-01'
+          tar -cf ../proton-dxvk.tar . --sort=name
           cd ..
+          mkdir -p "${{ env.OUTPUT_DIR }}"
           zstd --ultra -22 proton-dxvk.tar -o "${{ env.OUTPUT_DIR }}/proton-dxvk-${DXVK_VER}-mali-g57.wcp"
           rm -f proton-dxvk.tar
 
-          echo "### Proton DXVK output:" >> $GITHUB_STEP_SUMMARY
+          echo "### Output:" >> $GITHUB_STEP_SUMMARY
           ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload Proton DXVK addon (.wcp)
+      - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
           name: Proton-DXVK-MaliG57-Winlator
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
-
-      - name: Upload build log
-        uses: actions/upload-artifact@v4
-        with:
-          name: Proton-build-log
-          path: proton-build.log
-          retention-days: 7
-          if-no-files-found: warn
 
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -207,24 +168,6 @@ jobs:
         with:
           files: ${{ env.OUTPUT_DIR }}/*.wcp
           generate_release_notes: true
-          name: "Proton ${{ inputs.proton_branch }} DXVK - Mali G57 MC2 / Helio G99"
-          body: |
-            ## Proton DXVK Winlator Addon
-
-            **Format:** `.wcp`
-            **Source:** Proton ${{ inputs.proton_branch }} + GPLALL
-
-            ### Wine Source Patches
-            - ETC2/ASTC re-enabled for Mali G57
-            - ARM Mali GPU ID added to WineD3D driver table
-
-            ### DXVK Patches
-            - Async pipeline (GPLALL)
-            - GPL disabled on ARM proprietary
-            - Tiler batch + cached memory
-            - Low-latency frame pacing
-
-            ### Installation
-            Copy `.wcp` → Winlator → Addons → Install
+          name: "Proton DXVK - Mali G57"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

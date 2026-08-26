@@ -52,7 +52,7 @@ jobs:
             meson ninja-build gcc-mingw-w64 g++-mingw-w64 \
             glslang-tools libvulkan-dev spirv-tools spirv-headers \
             git python3 python3-mako cmake zstd \
-            gcc-multilib g++-multilib wine64
+            gcc-multilib g++-multilib
           sudo update-alternatives --set x86_64-w64-mingw32-gcc /usr/bin/x86_64-w64-mingw32-gcc-posix
           sudo update-alternatives --set x86_64-w64-mingw32-g++ /usr/bin/x86_64-w64-mingw32-g++-posix
           sudo update-alternatives --set i686-w64-mingw32-gcc /usr/bin/i686-w64-mingw32-gcc-posix
@@ -66,30 +66,6 @@ jobs:
           echo "## DXVK-Sarek Build Info" >> $GITHUB_STEP_SUMMARY
           echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
-
-      - name: Apply Mali G57 MC2 source patches
-        run: |
-          cd dxvk-sarek
-          PATCH_DIR="${GITHUB_WORKSPACE}/patches/dxvk-sarek"
-          if [ -d "$PATCH_DIR" ]; then
-            for p in "$PATCH_DIR"/*.patch; do
-              [ -f "$p" ] && echo "Applying $(basename $p)" && git apply --check "$p" && git apply "$p"
-            done
-          fi
-
-          # --- Patch: Mali tiler optimization ---
-          if grep -q "getPerfHints" src/dxvk/dxvk_device.cpp; then
-            sed -i '/bool tilerMode = /,/applyTristate(tilerMode/a\    if (m_adapter->matchesDriver(VK_DRIVER_ID_ARM_PROPRIETARY)) {\n      hints.preferRenderPassOps = true;\n      hints.preferCachedMemory = true;\n      hints.preferFbDepthStencilCopy = true;\n    }' src/dxvk/dxvk_device.cpp
-            echo "Patched: Mali perf hints (tiler, cached, depth copy)" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          # --- Patch: dyasync default for Mali ---
-          if grep -q "shaderCompilationMethod" src/dxvk/dxvk_options.cpp 2>/dev/null || grep -q "dyasync" src/dxvk/ -r 2>/dev/null; then
-            echo "dyasync already present in Sarek" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "- Tiler batch + cached memory hints forced" >> $GITHUB_STEP_SUMMARY
-          echo "- Vulkan 1.1/1.2 compatible (no upstream Vulkan 1.3 requirement)" >> $GITHUB_STEP_SUMMARY
 
       - name: Build 64-bit DXVK-Sarek
         if: inputs.build_64bit == true
@@ -133,38 +109,37 @@ jobs:
             cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
           fi
 
-          # Get version from git
           cd dxvk-sarek
           SAREK_VER=$(git describe --tags --always 2>/dev/null || echo "${{ inputs.sarek_branch }}")
           cd ..
 
-          cat > "$STAGE/profile.json" << JSONEOF
+          cat > "$STAGE/profile.json" << 'EOF'
           {
             "type": "DXVK",
-            "versionName": "sarek-${SAREK_VER}-mali-g57",
+            "versionName": "PLACEHOLDER_VER-mali-g57",
             "versionCode": 0,
-            "description": "DXVK-Sarek ${SAREK_VER} for Mali G57 MC2 + Helio G99. Vulkan 1.1/1.2, dyasync, tiler optimizations, low-latency.",
+            "description": "DXVK-Sarek for Mali G57 MC2 + Helio G99. Vulkan 1.1/1.2, dyasync, tiler, low-latency.",
             "files": [
-              {"source": "system32/d3d8.dll",     "target": "\${system32}/d3d8.dll"},
-              {"source": "system32/d3d9.dll",     "target": "\${system32}/d3d9.dll"},
-              {"source": "system32/d3d10.dll",    "target": "\${system32}/d3d10.dll"},
-              {"source": "system32/d3d10_1.dll",  "target": "\${system32}/d3d10_1.dll"},
-              {"source": "system32/d3d10core.dll","target": "\${system32}/d3d10core.dll"},
-              {"source": "system32/d3d11.dll",    "target": "\${system32}/d3d11.dll"},
-              {"source": "system32/dxgi.dll",     "target": "\${system32}/dxgi.dll"},
-              {"source": "syswow64/d3d8.dll",     "target": "\${syswow64}/d3d8.dll"},
-              {"source": "syswow64/d3d9.dll",     "target": "\${syswow64}/d3d9.dll"},
-              {"source": "syswow64/d3d10.dll",    "target": "\${syswow64}/d3d10.dll"},
-              {"source": "syswow64/d3d10_1.dll",  "target": "\${syswow64}/d3d10_1.dll"},
-              {"source": "syswow64/d3d10core.dll","target": "\${syswow64}/d3d10core.dll"},
-              {"source": "syswow64/d3d11.dll",    "target": "\${syswow64}/d3d11.dll"},
-              {"source": "syswow64/dxgi.dll",     "target": "\${syswow64}/dxgi.dll"}
+              {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
+              {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
+              {"source": "system32/d3d10.dll", "target": "${system32}/d3d10.dll"},
+              {"source": "system32/d3d10_1.dll", "target": "${system32}/d3d10_1.dll"},
+              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
+              {"source": "system32/d3d11.dll", "target": "${system32}/d3d11.dll"},
+              {"source": "system32/dxgi.dll", "target": "${system32}/dxgi.dll"},
+              {"source": "syswow64/d3d8.dll", "target": "${syswow64}/d3d8.dll"},
+              {"source": "syswow64/d3d9.dll", "target": "${syswow64}/d3d9.dll"},
+              {"source": "syswow64/d3d10.dll", "target": "${syswow64}/d3d10.dll"},
+              {"source": "syswow64/d3d10_1.dll", "target": "${syswow64}/d3d10_1.dll"},
+              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
+              {"source": "syswow64/d3d11.dll", "target": "${syswow64}/d3d11.dll"},
+              {"source": "syswow64/dxgi.dll", "target": "${syswow64}/dxgi.dll"}
             ]
           }
-          JSONEOF
+          EOF
+          sed -i "s/PLACEHOLDER_VER/${SAREK_VER}/" "$STAGE/profile.json"
 
-          cat > "$STAGE/dxvk.conf" << 'CONF'
-          # DXVK-Sarek Config - Mali G57 MC2 / Helio G99
+          cat > "$STAGE/dxvk.conf" << 'DXEOF'
           dxvk.shaderCompilationMethod = dyasync
           dxvk.enableStateCache = True
           dxvk.numCompilerThreads = 0
@@ -172,22 +147,20 @@ jobs:
           dxvk.maxFrameLatency = 1
           dxvk.tilerMode = batch
           d3d9.floatEmulation = Strict
-          d3d9.forceSamplerTypeSpecConstants = True
-          d3d9.supportDFFormats = True
           d3d8.batching = True
-          CONF
+          DXEOF
 
           cd "$STAGE"
-          tar -cf ../sarek-mali-g57.tar . --sort=name --mtime='UTC 2024-01-01'
+          tar -cf ../sarek-mali-g57.tar . --sort=name
           cd ..
+          mkdir -p "${{ env.OUTPUT_DIR }}"
           zstd --ultra -22 sarek-mali-g57.tar -o "${{ env.OUTPUT_DIR }}/dxvk-sarek-${SAREK_VER}-mali-g57.wcp"
           rm -f sarek-mali-g57.tar
 
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "### Output:" >> $GITHUB_STEP_SUMMARY
           ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
 
-      - name: Upload Winlator addon (.wcp)
+      - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
           name: DXVK-Sarek-MaliG57-Winlator
@@ -200,20 +173,6 @@ jobs:
         with:
           files: ${{ env.OUTPUT_DIR }}/*.wcp
           generate_release_notes: true
-          name: "DXVK-Sarek - Mali G57 MC2 / Helio G99"
-          body: |
-            ## DXVK-Sarek Winlator Addon
-
-            **Format:** `.wcp` (Winlator Content Package)
-            **Vulkan:** 1.1/1.2 (compatible with Mali G57 driver)
-
-            ### Mali G57 Patches
-            - Tiler batch + cached memory perf hints
-            - dyasync pipeline compilation
-            - Low-latency frame pacing
-            - D3D3-D3D7 backported support
-
-            ### Installation
-            Copy `.wcp` → Winlator → Addons → Install
+          name: "DXVK-Sarek - Mali G57"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
