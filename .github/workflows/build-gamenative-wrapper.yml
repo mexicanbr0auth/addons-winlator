@@ -50,6 +50,8 @@ jobs:
             -G Ninja \
             ..
           ninja -j$(nproc)
+          echo "Build directory contents:"
+          find . -name "*.so"
 
       - name: Package as Winlator .tzst
         run: |
