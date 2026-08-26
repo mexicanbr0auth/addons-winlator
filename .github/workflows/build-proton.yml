@@ -29,7 +29,7 @@ jobs:
     name: "Proton ${{ matrix.variant }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
-    if: inputs.variant == 'all' || inputs.variant == matrix.variant || github.event_name == 'push'
+    if: ${{ inputs.variant == 'all' || github.event_name == 'push' || github.event_name == 'schedule' }}
     strategy:
       fail-fast: false
       matrix:
