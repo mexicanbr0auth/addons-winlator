@@ -6,7 +6,6 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -std=c++17 -fvisibility=hidden -DAND
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
 
 add_subdirectory(src/virglrenderer)
-add_subdirectory(src/patchelf)
 
 add_library(winlator SHARED
     src/winlator/sysvshared_memory.c
