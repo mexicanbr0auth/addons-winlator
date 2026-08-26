@@ -1,47 +1,22 @@
-name: "Build All - Winlator Addons (Mali G57 / Helio G99)"
+name: "Build All - Winlator Addons"
 
 on:
   workflow_dispatch:
-    inputs:
-      build_dxvk:
-        description: 'Build DXVK (all 5 variants)'
-        required: false
-        default: true
-        type: boolean
-      build_dxvk_sarek:
-        description: 'Build DXVK-Sarek (all 5 variants)'
-        required: false
-        default: true
-        type: boolean
-      build_fex:
-        description: 'Build FEXCore (all 5 variants)'
-        required: false
-        default: true
-        type: boolean
-      build_proton:
-        description: 'Build Proton DXVK (all 5 variants)'
-        required: false
-        default: true
-        type: boolean
 
 jobs:
   build-dxvk:
-    if: inputs.build_dxvk == true
     uses: ./.github/workflows/build-dxvk.yml
     secrets: inherit
 
   build-dxvk-sarek:
-    if: inputs.build_dxvk_sarek == true
     uses: ./.github/workflows/build-dxvk-sarek.yml
     secrets: inherit
 
   build-fex:
-    if: inputs.build_fex == true
     uses: ./.github/workflows/build-fexcore.yml
     secrets: inherit
 
   build-proton:
-    if: inputs.build_proton == true
     uses: ./.github/workflows/build-proton.yml
     secrets: inherit
 
@@ -55,7 +30,7 @@ jobs:
           echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| DXVK (5 variants) | ${{ needs.build-dxvk.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| DXVK-Sarek (5 variants) | ${{ needs.build-dxvk-sarek.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| FEXCore (5 variants) | ${{ needs.build-fex.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Proton (5 variants) | ${{ needs.build-proton.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK GPLALL 2.6.8 | ${{ needs.build-dxvk.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK-Sarek | ${{ needs.build-dxvk-sarek.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| FEXCore 2507 | ${{ needs.build-fex.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Proton GPLALL 2.6.8 | ${{ needs.build-proton.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY

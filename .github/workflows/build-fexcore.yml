@@ -1,51 +1,16 @@
-name: "Build FEXCore (Winlator - Helio G99)"
+name: Build FEXCore (Winlator - Helio G99)
 
 on:
   workflow_dispatch:
 
 env:
-  FEX_REPO: 'https://github.com/FEX-Emu/FEX.git'
   OUTPUT_DIR: 'fex-output'
 
 jobs:
   build-fexcore:
-    name: "FEXCore ${{ matrix.variant }}"
+    name: FEXCore 2507 (ARM64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: fex-2507-full
-            tag: "FEX-2507-full"
-            fex_version: "FEX-2507"
-            desc: "FEX 2507 Full - Thunks + LTO + optimized"
-            thunks: true
-            lto: true
-          - variant: fex-2507-thunks
-            tag: "FEX-2507-thunks"
-            fex_version: "FEX-2507"
-            desc: "FEX 2507 Thunks - Vulkan/GL thunks, no LTO"
-            thunks: true
-            lto: false
-          - variant: fex-2506-stable
-            tag: "FEX-2506-stable"
-            fex_version: "FEX-2506"
-            desc: "FEX 2506 Stable - Proven stable with thunks+LTO"
-            thunks: true
-            lto: true
-          - variant: fex-2505-legacy
-            tag: "FEX-2505-legacy"
-            fex_version: "FEX-2505"
-            desc: "FEX 2505 Legacy - Older stable baseline"
-            thunks: true
-            lto: true
-          - variant: fex-2507-minimal
-            tag: "FEX-2507-minimal"
-            fex_version: "FEX-2507"
-            desc: "FEX 2507 Minimal - Smallest binary, no thunks"
-            thunks: false
-            lto: false
+    timeout-minutes: 60
 
     steps:
       - name: Setup gh + git auth
@@ -68,57 +33,32 @@ jobs:
             libssl-dev python3-setuptools libclang-17-dev \
             libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
-            libwayland-dev wayland-protocols nasm \
-            libc6-dev libgcc-14-dev libstdc++-14-dev \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            libssl-dev:arm64 zlib1g-dev:arm64
+            libc6-dev libgcc-14-dev libstdc++-14-dev
 
       - name: Clone FEX
         run: |
-          git clone --recurse-submodules --branch ${{ matrix.fex_version }} \
-            --depth 1 ${{ env.FEX_REPO }} fex || \
-          git clone --recurse-submodules --depth 1 ${{ env.FEX_REPO }} fex
-          cd fex
-          ACTUAL_VER=$(git describe --tags --always 2>/dev/null || echo "${{ matrix.fex_version }}")
-          echo "ACTUAL_VER=$ACTUAL_VER" >> $GITHUB_ENV
-          echo "## FEX ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
-          echo "- Version: $ACTUAL_VER" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
-          echo "- Thunks: ${{ matrix.thunks }}" >> $GITHUB_STEP_SUMMARY
-          echo "- LTO: ${{ matrix.lto }}" >> $GITHUB_STEP_SUMMARY
+          git clone --recurse-submodules --branch FEX-2507 \
+            --depth 1 https://github.com/FEX-Emu/FEX.git fex || \
+          git clone --recurse-submodules --depth 1 \
+            https://github.com/FEX-Emu/FEX.git fex
 
-      - name: Configure FEX (ARM64 cross-compile)
+      - name: Configure FEX (x86 host debug)
         run: |
           cd fex
           mkdir Build && cd Build
-          cat > ../toolchain-aarch64.cmake << 'TOOLCHAIN'
-          set(CMAKE_SYSTEM_NAME Linux)
-          set(CMAKE_SYSTEM_PROCESSOR aarch64)
-          set(CMAKE_C_COMPILER clang-17)
-          set(CMAKE_CXX_COMPILER clang++-17)
-          set(CMAKE_ASM_COMPILER clang-17)
-          set(CMAKE_AR llvm-ar-17)
-          set(CMAKE_RANLIB llvm-ranlib-17)
-          set(CMAKE_C_COMPILER_TARGET aarch64-linux-gnu)
-          set(CMAKE_CXX_COMPILER_TARGET aarch64-linux-gnu)
-          set(CMAKE_ASM_COMPILER_TARGET aarch64-linux-gnu)
-          set(CMAKE_FIND_ROOT_PATH /usr/aarch64-linux-gnu)
-          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
-          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
-          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
-          TOOLCHAIN
+          export CC=clang-17
+          export CXX=clang++-17
+          export LD=ld.lld-17
           cmake \
-            -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
-            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
-            -DENABLE_LTO=${{ matrix.lto && 'True' || 'False' }} \
+            -DENABLE_LTO=True \
             -DENABLE_ASSERTIONS=False \
             -DBUILD_TESTING=False \
-            -DBUILD_THUNKS=${{ matrix.thunks && 'True' || 'False' }} \
+            -DBUILD_THUNKS=True \
             -DBUILD_FEXCONFIG=False \
             -DENABLE_CCACHE=True \
+            -DENABLE_X86_HOST_DEBUG=True \
             -G Ninja \
             ..
 
@@ -130,7 +70,7 @@ jobs:
       - name: Package as Winlator .tzst
         run: |
           STAGE="fex-stage"
-          mkdir -p "$STAGE/usr/bin" "$STAGE/usr/lib" "$STAGE/etc/FEXCore"
+          mkdir -p "$STAGE/usr/bin" "$STAGE/usr/lib"
 
           cd fex/Build
           DESTDIR=$(pwd)/../../fex-install ninja install
@@ -139,40 +79,33 @@ jobs:
           cp fex-install/usr/bin/FEX* "$STAGE/usr/bin/" 2>/dev/null || true
           cp fex-install/usr/lib/libFEXCore* "$STAGE/usr/lib/" 2>/dev/null || true
           cp fex-install/usr/lib/FEXCore/* "$STAGE/usr/lib/" 2>/dev/null || true
-          cp fex-install/usr/lib/fex-emu* "$STAGE/usr/lib/" 2>/dev/null || true
 
-          FEX_VER="${ACTUAL_VER}"
-          FEX_TAG="${{ matrix.tag }}"
+          FEX_VER=$(cd fex && git describe --tags --always 2>/dev/null || echo "FEX-2507")
 
-          cat > "$STAGE/profile.json" << EOF
+          cat > "$STAGE/profile.json" << PROFILE
           {
             "type": "FEXCore",
-            "versionName": "${FEX_TAG}",
+            "versionName": "${FEX_VER}",
             "versionCode": 0,
-            "description": "${{ matrix.desc }}",
+            "description": "FEX ${FEX_VER} - x86 emulation for Helio G99 ARM64",
             "files": [
               {"source": "usr/bin/FEXLoader", "target": "\${bindir}/FEXLoader"},
               {"source": "usr/bin/FEXInterpreter", "target": "\${bindir}/FEXInterpreter"},
               {"source": "usr/lib/libFEXCore.so", "target": "\${libdir}/libFEXCore.so"}
             ]
           }
-          EOF
+          PROFILE
 
           cd "$STAGE"
           tar -cf ../fex-helio-g99.tar . --sort=name
           cd ..
-          mkdir -p "${{ env.OUTPUT_DIR }}"
-          zstd --ultra -22 fex-helio-g99.tar -o "${{ env.OUTPUT_DIR }}/fex-${FEX_TAG}-helio-g99.tzst"
+          mkdir -p "$OUTPUT_DIR"
+          zstd --ultra -22 fex-helio-g99.tar -o "$OUTPUT_DIR/fex-${FEX_VER}-helio-g99.tzst"
           rm -f fex-helio-g99.tar
-
-          echo "### Output:" >> $GITHUB_STEP_SUMMARY
-          ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: "FEXCore-${{ matrix.variant }}-Winlator"
+          name: FEXCore-HelioG99-Winlator
           path: ${{ env.OUTPUT_DIR }}/*.tzst
           retention-days: 30
-
-

@@ -1,47 +1,16 @@
-name: "Build Proton (Winlator - Mali G57)"
+name: Build Proton DXVK (Winlator - Mali G57)
 
 on:
   workflow_dispatch:
 
 env:
-  DXVK_REPO: 'https://github.com/doitsujin/dxvk.git'
-  DXVK_GPLALL_REPO: 'https://github.com/Digger1955/dxvk-gplall.git'
   OUTPUT_DIR: 'proton-output'
 
 jobs:
   build-proton:
-    name: "Proton ${{ matrix.variant }}"
+    name: Proton GPLALL 2.6.8 DXVK
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: gplall-balanced
-            tag: "proton-gplall-2.6.8-balanced"
-            desc: "Proton GPLALL Balanced - Best overall"
-            use_gplall: true
-            branch: GPLALL-master-2.6.8
-          - variant: gplall-performance
-            tag: "proton-gplall-2.6.8-perf"
-            desc: "Proton GPLALL Performance - Max FPS"
-            use_gplall: true
-            branch: GPLALL-master-2.6.8
-          - variant: gplall-compat
-            tag: "proton-gplall-2.6.8-compat"
-            desc: "Proton GPLALL Compatibility - Fix glitches"
-            use_gplall: true
-            branch: GPLALL-master-2.6.8
-          - variant: dxvk-261
-            tag: "proton-dxvk-2.6.1"
-            desc: "Proton Stock DXVK 2.6.1 - Stable"
-            use_gplall: false
-            branch: dxvk-2.6.1
-          - variant: dxvk-251
-            tag: "proton-dxvk-2.5.1"
-            desc: "Proton Stock DXVK 2.5.1 - Legacy stable"
-            use_gplall: false
-            branch: dxvk-2.5.1
+    timeout-minutes: 30
 
     steps:
       - name: Setup gh + git auth
@@ -69,27 +38,17 @@ jobs:
           sudo update-alternatives --set i686-w64-mingw32-gcc /usr/bin/i686-w64-mingw32-gcc-posix
           sudo update-alternatives --set i686-w64-mingw32-g++ /usr/bin/i686-w64-mingw32-g++-posix
 
-      - name: Clone DXVK source
+      - name: Clone DXVK-GPLALL 2.6.8
         run: |
-          if [ "${{ matrix.use_gplall }}" = "true" ]; then
-            git clone --recursive --branch ${{ matrix.branch }} \
-              ${{ env.DXVK_GPLALL_REPO }} dxvk
-          else
-            git clone --recursive --branch ${{ matrix.branch }} \
-              ${{ env.DXVK_REPO }} dxvk
-          fi
-          cd dxvk
-          echo "## Proton ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
-          echo "- Variant: ${{ matrix.variant }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
+          git clone --recursive --branch GPLALL-master-2.6.8 \
+            https://github.com/Digger1955/dxvk-gplall.git dxvk
 
       - name: Build 64-bit
         run: |
           cd dxvk
           meson setup build.w64 \
             --cross-file build-win64.txt \
-            --buildtype release \
-            --strip \
+            --buildtype release --strip \
             --prefix $(pwd)/../build-install/x64 \
             --bindir bin --libdir bin \
             -Db_ndebug=if-release \
@@ -103,8 +62,7 @@ jobs:
           cd dxvk
           meson setup build.w32 \
             --cross-file build-win32.txt \
-            --buildtype release \
-            --strip \
+            --buildtype release --strip \
             --prefix $(pwd)/../build-install/x32 \
             --bindir bin --libdir bin \
             -Db_ndebug=if-release \
@@ -117,18 +75,15 @@ jobs:
         run: |
           STAGE="proton-dxvk-stage"
           mkdir -p "$STAGE/system32" "$STAGE/syswow64"
-
           cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
           cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
 
-          DXVK_VER="${{ matrix.tag }}"
-
-          cat > "$STAGE/profile.json" << 'EOF'
+          cat > "$STAGE/profile.json" << 'PROFILE'
           {
             "type": "DXVK",
-            "versionName": "PLACEHOLDER_VER-mali-g57",
+            "versionName": "proton-gplall-2.6.8-mali-g57",
             "versionCode": 0,
-            "description": "${PLACEHOLDER_DESC}",
+            "description": "Proton GPLALL 2.6.8 DXVK - Mali G57 MC2 / Helio G99",
             "files": [
               {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
               {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
@@ -142,102 +97,35 @@ jobs:
               {"source": "syswow64/dxgi.dll", "target": "${syswow64}/dxgi.dll"}
             ]
           }
-          EOF
-          sed -i "s/PLACEHOLDER_VER/${DXVK_VER}/" "$STAGE/profile.json"
-          sed -i "s/\${PLACEHOLDER_DESC}/${{ matrix.desc }}/g" "$STAGE/profile.json"
+          PROFILE
 
-          IS_GPLALL="${{ matrix.use_gplall }}"
-
-          case "${{ matrix.variant }}" in
-            gplall-balanced)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.enableAsync = True
-              dxvk.enableGraphicsPipelineLibrary = False
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 1
-              dxvk.numAsyncThreads = 2
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              DXEOF
-              ;;
-            gplall-performance)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.enableAsync = True
-              dxvk.enableGraphicsPipelineLibrary = False
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = flow
-              dxvk.maxFrameLatency = 0
-              dxvk.numAsyncThreads = 4
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d11.disableMsaa = True
-              d3d11.forceTightFrustum = True
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              DXEOF
-              ;;
-            gplall-compat)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.enableAsync = True
-              dxvk.enableGraphicsPipelineLibrary = False
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 2
-              dxvk.numAsyncThreads = 1
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = True
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              DXEOF
-              ;;
-            dxvk-261|dxvk-251)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.enableGraphicsPipelineLibrary = False
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 1
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              DXEOF
-              ;;
-          esac
+          cat > "$STAGE/dxvk.conf" << 'DXEOF'
+          dxvk.enableAsync = True
+          dxvk.enableGraphicsPipelineLibrary = False
+          dxvk.enableStateCache = True
+          dxvk.numCompilerThreads = 0
+          dxvk.numAsyncThreads = 2
+          dxvk.framePace = low-latency
+          dxvk.maxFrameLatency = 1
+          d3d11.cachedDynamicResources = Memory
+          d3d11.enableDeferredContexts = False
+          d3d11.syncInterval = 0
+          d3d9.presentInterval = 0
+          d3d9.floatEmulation = Strict
+          d3d9.allowDoNotWait = True
+          d3d9.enableDialogMode = True
+          DXEOF
 
           cd "$STAGE"
           tar -cf ../proton-dxvk.tar . --sort=name
           cd ..
-          mkdir -p "${{ env.OUTPUT_DIR }}"
-          zstd --ultra -22 proton-dxvk.tar -o "${{ env.OUTPUT_DIR }}/proton-${DXVK_VER}-mali-g57.wcp"
+          mkdir -p "$OUTPUT_DIR"
+          zstd --ultra -22 proton-dxvk.tar -o "$OUTPUT_DIR/proton-gplall-2.6.8-mali-g57.wcp"
           rm -f proton-dxvk.tar
-
-          echo "### Output:" >> $GITHUB_STEP_SUMMARY
-          ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: "Proton-${{ matrix.variant }}-MaliG57"
+          name: Proton-DXVK-MaliG57-Winlator
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
-
-

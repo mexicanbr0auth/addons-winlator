@@ -1,36 +1,16 @@
-name: "Build DXVK-Sarek (Winlator - Mali G57)"
+name: Build DXVK-Sarek (Winlator - Mali G57)
 
 on:
   workflow_dispatch:
 
 env:
-  DXVK_SAREK_REPO: 'https://github.com/pythonlover02/DXVK-Sarek.git'
   OUTPUT_DIR: 'dxvk-sarek-output'
 
 jobs:
   build-dxvk-sarek:
-    name: "DXVK-Sarek ${{ matrix.variant }}"
+    name: DXVK-Sarek (Vulkan 1.1/1.2)
     runs-on: ubuntu-24.04
-    timeout-minutes: 120
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - variant: balanced
-            tag: "sarek-balanced"
-            desc: "Balanced - Vulkan 1.1/1.2 optimized for Mali G57"
-          - variant: performance
-            tag: "sarek-performance"
-            desc: "Performance - Max FPS for Mali G57"
-          - variant: compatibility
-            tag: "sarek-compatibility"
-            desc: "Compatibility - Fix graphical glitches"
-          - variant: dyasync
-            tag: "sarek-dyasync"
-            desc: "DyAsync - Dynamic async shader compilation"
-          - variant: tiler
-            tag: "sarek-tiler"
-            desc: "Tiler - Tile-based rendering optimized"
+    timeout-minutes: 30
 
     steps:
       - name: Setup gh + git auth
@@ -60,15 +40,8 @@ jobs:
 
       - name: Clone DXVK-Sarek
         run: |
-          git clone --recursive --branch main \
-            --depth 1 ${{ env.DXVK_SAREK_REPO }} dxvk-sarek
-          cd dxvk-sarek
-          echo "## DXVK-Sarek ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
-          echo "- Variant: ${{ matrix.variant }}" >> $GITHUB_STEP_SUMMARY
-          echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
-
-      - name: Fix DXVK-Sarek compile error (std::sqrtf)
-        run: |
+          git clone --recursive --branch main --depth 1 \
+            https://github.com/pythonlover02/DXVK-Sarek.git dxvk-sarek
           cd dxvk-sarek
           find src/ -name "*.h" -o -name "*.cpp" | xargs sed -i 's/std::sqrtf/std::sqrt/g' 2>/dev/null || true
 
@@ -77,11 +50,9 @@ jobs:
           cd dxvk-sarek
           meson setup build.w64 \
             --cross-file build-win64.txt \
-            --buildtype release \
-            --strip \
+            --buildtype release --strip \
             --prefix $(pwd)/../build-install/x64 \
-            --bindir bin \
-            --libdir bin \
+            --bindir bin --libdir bin \
             -Db_ndebug=if-release
           ninja -C build.w64 -j$(nproc)
           ninja -C build.w64 install
@@ -91,11 +62,9 @@ jobs:
           cd dxvk-sarek
           meson setup build.w32 \
             --cross-file build-win32.txt \
-            --buildtype release \
-            --strip \
+            --buildtype release --strip \
             --prefix $(pwd)/../build-install/x32 \
-            --bindir bin \
-            --libdir bin \
+            --bindir bin --libdir bin \
             -Db_ndebug=if-release
           ninja -C build.w32 -j$(nproc)
           ninja -C build.w32 install
@@ -104,7 +73,6 @@ jobs:
         run: |
           STAGE="dxvk-sarek-stage"
           mkdir -p "$STAGE/system32" "$STAGE/syswow64"
-
           cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
           cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
 
@@ -112,144 +80,55 @@ jobs:
           SAREK_VER=$(git describe --tags --always 2>/dev/null || echo "main")
           cd ..
 
-          DXVK_VER="sarek-${SAREK_VER}-${{ matrix.tag }}"
-
-          cat > "$STAGE/profile.json" << 'EOF'
+          cat > "$STAGE/profile.json" << PROFILE
           {
             "type": "DXVK",
-            "versionName": "PLACEHOLDER_VER-mali-g57",
+            "versionName": "sarek-${SAREK_VER}-mali-g57",
             "versionCode": 0,
-            "description": "${PLACEHOLDER_DESC}",
+            "description": "DXVK-Sarek ${SAREK_VER} - Mali G57 MC2 / Helio G99",
             "files": [
-              {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
-              {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
-              {"source": "system32/d3d10core.dll", "target": "${system32}/d3d10core.dll"},
-              {"source": "system32/d3d11.dll", "target": "${system32}/d3d11.dll"},
-              {"source": "system32/dxgi.dll", "target": "${system32}/dxgi.dll"},
-              {"source": "syswow64/d3d8.dll", "target": "${syswow64}/d3d8.dll"},
-              {"source": "syswow64/d3d9.dll", "target": "${syswow64}/d3d9.dll"},
-              {"source": "syswow64/d3d10core.dll", "target": "${syswow64}/d3d10core.dll"},
-              {"source": "syswow64/d3d11.dll", "target": "${syswow64}/d3d11.dll"},
-              {"source": "syswow64/dxgi.dll", "target": "${syswow64}/dxgi.dll"}
+              {"source": "system32/d3d8.dll", "target": "\${system32}/d3d8.dll"},
+              {"source": "system32/d3d9.dll", "target": "\${system32}/d3d9.dll"},
+              {"source": "system32/d3d10core.dll", "target": "\${system32}/d3d10core.dll"},
+              {"source": "system32/d3d11.dll", "target": "\${system32}/d3d11.dll"},
+              {"source": "system32/dxgi.dll", "target": "\${system32}/dxgi.dll"},
+              {"source": "syswow64/d3d8.dll", "target": "\${syswow64}/d3d8.dll"},
+              {"source": "syswow64/d3d9.dll", "target": "\${syswow64}/d3d9.dll"},
+              {"source": "syswow64/d3d10core.dll", "target": "\${syswow64}/d3d10core.dll"},
+              {"source": "syswow64/d3d11.dll", "target": "\${syswow64}/d3d11.dll"},
+              {"source": "syswow64/dxgi.dll", "target": "\${syswow64}/dxgi.dll"}
             ]
           }
-          EOF
-          sed -i "s/PLACEHOLDER_VER/${DXVK_VER}/" "$STAGE/profile.json"
-          sed -i "s/\${PLACEHOLDER_DESC}/${{ matrix.desc }}/g" "$STAGE/profile.json"
+          PROFILE
 
-          case "${{ matrix.variant }}" in
-            balanced)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.shaderCompilationMethod = dyasync
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 1
-              dxvk.numAsyncThreads = 2
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              d3d8.batching = True
-              DXEOF
-              ;;
-            performance)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.shaderCompilationMethod = dyasync
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = flow
-              dxvk.maxFrameLatency = 0
-              dxvk.numAsyncThreads = 4
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d11.disableMsaa = True
-              d3d11.forceTightFrustum = True
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              d3d9.fastAssert = True
-              d3d8.batching = True
-              DXEOF
-              ;;
-            compatibility)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.shaderCompilationMethod = dyasync
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 2
-              dxvk.numAsyncThreads = 1
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = True
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              d3d8.batching = True
-              DXEOF
-              ;;
-            dyasync)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.shaderCompilationMethod = dyasync
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 1
-              dxvk.numAsyncThreads = 3
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              d3d8.batching = True
-              DXEOF
-              ;;
-            tiler)
-              cat > "$STAGE/dxvk.conf" << 'DXEOF'
-              dxvk.shaderCompilationMethod = dyasync
-              dxvk.enableStateCache = True
-              dxvk.numCompilerThreads = 0
-              dxvk.framePace = low-latency
-              dxvk.maxFrameLatency = 1
-              dxvk.numAsyncThreads = 2
-              dxvk.tilerMode = batch
-              d3d11.cachedDynamicResources = Memory
-              d3d11.enableDeferredContexts = False
-              d3d11.syncInterval = 0
-              d3d11.preferRawDepthStencil = True
-              d3d9.floatEmulation = Strict
-              d3d9.presentInterval = 0
-              d3d9.allowDoNotWait = True
-              d3d9.enableDialogMode = True
-              d3d8.batching = True
-              DXEOF
-              ;;
-          esac
+          cat > "$STAGE/dxvk.conf" << 'DXEOF'
+          dxvk.shaderCompilationMethod = dyasync
+          dxvk.enableStateCache = True
+          dxvk.numCompilerThreads = 0
+          dxvk.numAsyncThreads = 2
+          dxvk.framePace = low-latency
+          dxvk.maxFrameLatency = 1
+          dxvk.tilerMode = batch
+          d3d11.cachedDynamicResources = Memory
+          d3d11.enableDeferredContexts = False
+          d3d11.syncInterval = 0
+          d3d9.presentInterval = 0
+          d3d9.floatEmulation = Strict
+          d3d9.allowDoNotWait = True
+          d3d9.enableDialogMode = True
+          d3d8.batching = True
+          DXEOF
 
           cd "$STAGE"
           tar -cf ../sarek-mali-g57.tar . --sort=name
           cd ..
-          mkdir -p "${{ env.OUTPUT_DIR }}"
-          zstd --ultra -22 sarek-mali-g57.tar -o "${{ env.OUTPUT_DIR }}/dxvk-sarek-${DXVK_VER}-mali-g57.wcp"
+          mkdir -p "$OUTPUT_DIR"
+          zstd --ultra -22 sarek-mali-g57.tar -o "$OUTPUT_DIR/dxvk-sarek-${SAREK_VER}-mali-g57.wcp"
           rm -f sarek-mali-g57.tar
-
-          echo "### Output:" >> $GITHUB_STEP_SUMMARY
-          ls -lh ${{ env.OUTPUT_DIR }}/ >> $GITHUB_STEP_SUMMARY
 
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: "DXVK-Sarek-${{ matrix.variant }}-MaliG57"
+          name: DXVK-Sarek-MaliG57-Winlator
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
-
-
