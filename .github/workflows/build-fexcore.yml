@@ -33,7 +33,7 @@ jobs:
             libssl-dev python3-setuptools libclang-17-dev \
             libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
-            libc6-dev libgcc-14-dev libstdc++-14-dev
+            libc6-dev libgcc-14-dev libstdc++-14-dev nasm
 
       - name: Clone FEX
         run: |
