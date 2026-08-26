@@ -5,7 +5,7 @@ set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -O2 -Wno-unused-function -Wimplicit-function
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -O2 -std=c++17 -fvisibility=hidden -DANDROID")
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -s")
 
-add_subdirectory(src/virglrenderer)
+# add_subdirectory(src/virglrenderer)
 
 add_library(winlator SHARED
     src/winlator/sysvshared_memory.c
