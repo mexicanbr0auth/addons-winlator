@@ -59,11 +59,9 @@ jobs:
 
           cd gamenative/build
 
-          # Copy all built libraries
+          # Copy built libraries
           cp libvulkan_renderer.so "../../$STAGE/system32/"
           cp libwinlator.so "../../$STAGE/system32/"
-          cp libvirglrenderer.so "../../$STAGE/system32/"
-          cp libpatchelf.so "../../$STAGE/system32/"
 
           cd ../../
 
@@ -76,9 +74,7 @@ jobs:
             "description": "GameNative Vulkan Renderer - Mali G57 MC2 + Helio G99",
             "files": [
               {"source": "system32/libvulkan_renderer.so", "target": "${system32}/libvulkan_renderer.so"},
-              {"source": "system32/libwinlator.so", "target": "${system32}/libwinlator.so"},
-              {"source": "system32/libvirglrenderer.so", "target": "${system32}/libvirglrenderer.so"},
-              {"source": "system32/libpatchelf.so", "target": "${system32}/libpatchelf.so"}
+              {"source": "system32/libwinlator.so", "target": "${system32}/libwinlator.so"}
             ]
           }
           PROFILE
