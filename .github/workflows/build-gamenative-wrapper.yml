@@ -20,25 +20,30 @@ jobs:
         run: |
           sudo apt-get update -qq
           sudo apt-get install -y --no-install-recommends \
-            cmake ninja-build glslang-tools \
-            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
-            libc6-dev-arm64-cross libgl-dev \
-            libgles-dev libgles2-mesa-dev
+            cmake ninja-build glslang-tools zstd unzip wget
 
-      - name: Build with ARM64 cross-compiler
+      - name: Install Android NDK
+        run: |
+          if [ ! -d "$ANDROID_NDK" ]; then
+            wget -q https://dl.google.com/android/repository/android-ndk-r27c-linux.zip -O /tmp/ndk.zip
+            unzip -q /tmp/ndk.zip -d /opt
+            mv /opt/android-ndk-r27c "$ANDROID_NDK"
+          fi
+          echo "NDK version: $(cat $ANDROID_NDK/source.properties | grep Pkg.Revision)"
+        env:
+          ANDROID_NDK: /opt/android-ndk-r27c
+
+      - name: Build with Android NDK
         run: |
           cd gamenative
           mkdir -p build && cd build
           cmake \
-            -DCMAKE_SYSTEM_NAME=Linux \
-            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
-            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
-            -DCMAKE_ASM_COMPILER=aarch64-linux-gnu-gcc \
-            -DCMAKE_AR=aarch64-linux-gnu-gcc-ar \
-            -DCMAKE_RANLIB=aarch64-linux-gnu-gcc-ranlib \
-            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_TOOLCHAIN_FILE=$ANDROID_NDK/build/cmake/android.toolchain.cmake \
+            -DANDROID_ABI=arm64-v8a \
+            -DANDROID_PLATFORM=android-29 \
+            -DANDROID_STL=none \
             -DCMAKE_BUILD_TYPE=Release \
+            -DCMAKE_INSTALL_PREFIX=/usr \
             -G Ninja \
             ..
           ninja -j$(nproc)
