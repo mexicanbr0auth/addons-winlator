@@ -33,7 +33,10 @@ jobs:
             libssl-dev python3-setuptools libclang-17-dev \
             libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
-            libc6-dev libgcc-14-dev libstdc++-14-dev nasm
+            libc6-dev libgcc-14-dev libstdc++-14-dev \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross libgcc-14-dev-arm64-cross \
+            libstdc++-14-dev-arm64-cross
 
       - name: Clone FEX
         run: |
@@ -42,14 +45,28 @@ jobs:
           git clone --recurse-submodules --depth 1 \
             https://github.com/FEX-Emu/FEX.git fex
 
-      - name: Configure FEX (x86 host debug)
+      - name: Configure FEX (ARM64 cross-compile)
         run: |
           cd fex
           mkdir Build && cd Build
-          export CC=clang-17
-          export CXX=clang++-17
-          export LD=ld.lld-17
+          cat > ../toolchain-aarch64.cmake << 'TOOLCHAIN'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+          set(CMAKE_C_COMPILER clang-17)
+          set(CMAKE_CXX_COMPILER clang++-17)
+          set(CMAKE_ASM_COMPILER clang-17)
+          set(CMAKE_AR llvm-ar-17)
+          set(CMAKE_RANLIB llvm-ranlib-17)
+          set(CMAKE_C_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_CXX_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_ASM_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_C_FLAGS_INIT "-target aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu")
+          set(CMAKE_CXX_FLAGS_INIT "-target aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu")
+          set(CMAKE_EXE_LINKER_FLAGS_INIT "--sysroot=/usr/aarch64-linux-gnu -L/usr/aarch64-linux-gnu/lib -L/usr/lib/gcc-cross/aarch64-linux-gnu")
+          set(CMAKE_SHARED_LINKER_FLAGS_INIT "--sysroot=/usr/aarch64-linux-gnu -L/usr/aarch64-linux-gnu/lib -L/usr/lib/gcc-cross/aarch64-linux-gnu")
+          TOOLCHAIN
           cmake \
+            -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_LTO=True \
