@@ -1,0 +1,90 @@
+name: Build GameNative Wrapper (Mali G57)
+
+on:
+  workflow_dispatch:
+
+env:
+  OUTPUT_DIR: 'wrapper-output'
+
+jobs:
+  build-wrapper:
+    name: GameNative Wrapper (ARM64)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            cmake ninja-build glslang-tools \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libc6-dev-arm64-cross libgl-dev \
+            libgles-dev libgles2-mesa-dev
+
+      - name: Build with ARM64 cross-compiler
+        run: |
+          cd gamenative
+          mkdir -p build && cd build
+          cmake \
+            -DCMAKE_SYSTEM_NAME=Linux \
+            -DCMAKE_SYSTEM_PROCESSOR=aarch64 \
+            -DCMAKE_C_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_CXX_COMPILER=aarch64-linux-gnu-g++ \
+            -DCMAKE_ASM_COMPILER=aarch64-linux-gnu-gcc \
+            -DCMAKE_AR=aarch64-linux-gnu-gcc-ar \
+            -DCMAKE_RANLIB=aarch64-linux-gnu-gcc-ranlib \
+            -DCMAKE_INSTALL_PREFIX=/usr \
+            -DCMAKE_BUILD_TYPE=Release \
+            -G Ninja \
+            ..
+          ninja -j$(nproc)
+
+      - name: Package as Winlator .tzst
+        run: |
+          STAGE="wrapper-stage"
+          mkdir -p "$STAGE/system32"
+
+          cd gamenative/build
+
+          # Copy all built libraries
+          cp libvulkan_renderer.so "../../$STAGE/system32/"
+          cp libwinlator.so "../../$STAGE/system32/"
+          cp libvirglrenderer.so "../../$STAGE/system32/"
+          cp libpatchelf.so "../../$STAGE/system32/"
+
+          cd ../../
+
+          # Create profile.json
+          cat > "$STAGE/profile.json" << 'PROFILE'
+          {
+            "type": "Wrapper",
+            "versionName": "gamenative-mali-g57",
+            "versionCode": 1,
+            "description": "GameNative Vulkan Renderer - Mali G57 MC2 + Helio G99",
+            "files": [
+              {"source": "system32/libvulkan_renderer.so", "target": "${system32}/libvulkan_renderer.so"},
+              {"source": "system32/libwinlator.so", "target": "${system32}/libwinlator.so"},
+              {"source": "system32/libvirglrenderer.so", "target": "${system32}/libvirglrenderer.so"},
+              {"source": "system32/libpatchelf.so", "target": "${system32}/libpatchelf.so"}
+            ]
+          }
+          PROFILE
+
+          cd "$STAGE"
+          tar -cf ../wrapper-mali-g57.tar . --sort=name
+          cd ..
+          mkdir -p "$OUTPUT_DIR"
+          zstd --ultra -22 wrapper-mali-g57.tar -o "$OUTPUT_DIR/wrapper-mali-g57.tzst"
+          rm -f wrapper-mali-g57.tar
+          ls -lh "$OUTPUT_DIR/"
+
+      - name: Upload Winlator addon
+        uses: actions/upload-artifact@v4
+        with:
+          name: GameNative-Wrapper-MaliG57-Winlator
+          path: ${{ env.OUTPUT_DIR }}/*.tzst
+          retention-days: 30
