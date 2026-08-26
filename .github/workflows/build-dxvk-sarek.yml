@@ -1,23 +1,20 @@
-name: Build DXVK-Sarek (Winlator - Mali G57 / Helio G99)
+name: "Build DXVK-Sarek (Winlator - Mali G57)"
 
 on:
   workflow_dispatch:
     inputs:
-      sarek_branch:
-        description: 'DXVK-Sarek branch'
+      variant:
+        description: 'Build variant (all/one)'
         required: false
-        default: 'main'
-        type: string
-      build_32bit:
-        description: 'Build 32-bit DLLs'
-        required: false
-        default: true
-        type: boolean
-      build_64bit:
-        description: 'Build 64-bit DLLs'
-        required: false
-        default: true
-        type: boolean
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - balanced
+          - performance
+          - compatibility
+          - dyasync
+          - tiler
   push:
     tags:
       - 'dxvk-sarek-*'
@@ -28,9 +25,29 @@ env:
 
 jobs:
   build-dxvk-sarek:
-    name: DXVK-Sarek (Vulkan 1.1/1.2)
+    name: "DXVK-Sarek ${{ matrix.variant }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    if: inputs.variant == 'all' || inputs.variant == matrix.variant || github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: balanced
+            tag: "sarek-balanced"
+            desc: "Balanced - Vulkan 1.1/1.2 optimized for Mali G57"
+          - variant: performance
+            tag: "sarek-performance"
+            desc: "Performance - Max FPS for Mali G57"
+          - variant: compatibility
+            tag: "sarek-compatibility"
+            desc: "Compatibility - Fix graphical glitches"
+          - variant: dyasync
+            tag: "sarek-dyasync"
+            desc: "DyAsync - Dynamic async shader compilation"
+          - variant: tiler
+            tag: "sarek-tiler"
+            desc: "Tiler - Tile-based rendering optimized"
 
     steps:
       - name: Setup gh + git auth
@@ -60,21 +77,19 @@ jobs:
 
       - name: Clone DXVK-Sarek
         run: |
-          git clone --recursive --branch ${{ inputs.sarek_branch }} \
+          git clone --recursive --branch main \
             --depth 1 ${{ env.DXVK_SAREK_REPO }} dxvk-sarek
           cd dxvk-sarek
-          echo "## DXVK-Sarek Build Info" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
+          echo "## DXVK-Sarek ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Variant: ${{ matrix.variant }}" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
 
       - name: Fix DXVK-Sarek compile error (std::sqrtf)
         run: |
           cd dxvk-sarek
-          sed -i 's/std::sqrtf/std::sqrt/g' src/ddraw/d3d3/../d3d_process_vertices.h 2>/dev/null || true
           find src/ -name "*.h" -o -name "*.cpp" | xargs sed -i 's/std::sqrtf/std::sqrt/g' 2>/dev/null || true
 
       - name: Build 64-bit DXVK-Sarek
-        if: inputs.build_64bit == true
         run: |
           cd dxvk-sarek
           meson setup build.w64 \
@@ -89,7 +104,6 @@ jobs:
           ninja -C build.w64 install
 
       - name: Build 32-bit DXVK-Sarek
-        if: inputs.build_32bit == true
         run: |
           cd dxvk-sarek
           meson setup build.w32 \
@@ -108,23 +122,21 @@ jobs:
           STAGE="dxvk-sarek-stage"
           mkdir -p "$STAGE/system32" "$STAGE/syswow64"
 
-          if [ "${{ inputs.build_64bit }}" = "true" ]; then
-            cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
-          fi
-          if [ "${{ inputs.build_32bit }}" = "true" ]; then
-            cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
-          fi
+          cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
+          cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
 
           cd dxvk-sarek
-          SAREK_VER=$(git describe --tags --always 2>/dev/null || echo "${{ inputs.sarek_branch }}")
+          SAREK_VER=$(git describe --tags --always 2>/dev/null || echo "main")
           cd ..
+
+          DXVK_VER="sarek-${SAREK_VER}-${{ matrix.tag }}"
 
           cat > "$STAGE/profile.json" << 'EOF'
           {
             "type": "DXVK",
             "versionName": "PLACEHOLDER_VER-mali-g57",
             "versionCode": 0,
-            "description": "DXVK-Sarek for Mali G57 MC2 + Helio G99. Vulkan 1.1/1.2, dyasync, tiler, low-latency.",
+            "description": "${PLACEHOLDER_DESC}",
             "files": [
               {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
               {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
@@ -139,24 +151,112 @@ jobs:
             ]
           }
           EOF
-          sed -i "s/PLACEHOLDER_VER/${SAREK_VER}/" "$STAGE/profile.json"
+          sed -i "s/PLACEHOLDER_VER/${DXVK_VER}/" "$STAGE/profile.json"
+          sed -i "s/\${PLACEHOLDER_DESC}/${{ matrix.desc }}/g" "$STAGE/profile.json"
 
-          cat > "$STAGE/dxvk.conf" << 'DXEOF'
-          dxvk.shaderCompilationMethod = dyasync
-          dxvk.enableStateCache = True
-          dxvk.numCompilerThreads = 0
-          dxvk.framePace = low-latency
-          dxvk.maxFrameLatency = 1
-          dxvk.tilerMode = batch
-          d3d9.floatEmulation = Strict
-          d3d8.batching = True
-          DXEOF
+          case "${{ matrix.variant }}" in
+            balanced)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.shaderCompilationMethod = dyasync
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 2
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.presentInterval = 0
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d8.batching = True
+              DXEOF
+              ;;
+            performance)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.shaderCompilationMethod = dyasync
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = flow
+              dxvk.maxFrameLatency = 0
+              dxvk.numAsyncThreads = 4
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.disableMsaa = True
+              d3d11.forceTightFrustum = True
+              d3d9.floatEmulation = Strict
+              d3d9.presentInterval = 0
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d9.fastAssert = True
+              d3d8.batching = True
+              DXEOF
+              ;;
+            compatibility)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.shaderCompilationMethod = dyasync
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 2
+              dxvk.numAsyncThreads = 1
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d9.floatEmulation = True
+              d3d9.presentInterval = 0
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d8.batching = True
+              DXEOF
+              ;;
+            dyasync)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.shaderCompilationMethod = dyasync
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 3
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.presentInterval = 0
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d8.batching = True
+              DXEOF
+              ;;
+            tiler)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.shaderCompilationMethod = dyasync
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 2
+              dxvk.tilerMode = batch
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.preferRawDepthStencil = True
+              d3d9.floatEmulation = Strict
+              d3d9.presentInterval = 0
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d8.batching = True
+              DXEOF
+              ;;
+          esac
 
           cd "$STAGE"
           tar -cf ../sarek-mali-g57.tar . --sort=name
           cd ..
           mkdir -p "${{ env.OUTPUT_DIR }}"
-          zstd --ultra -22 sarek-mali-g57.tar -o "${{ env.OUTPUT_DIR }}/dxvk-sarek-${SAREK_VER}-mali-g57.wcp"
+          zstd --ultra -22 sarek-mali-g57.tar -o "${{ env.OUTPUT_DIR }}/dxvk-sarek-${DXVK_VER}-mali-g57.wcp"
           rm -f sarek-mali-g57.tar
 
           echo "### Output:" >> $GITHUB_STEP_SUMMARY
@@ -165,7 +265,7 @@ jobs:
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: DXVK-Sarek-MaliG57-Winlator
+          name: "DXVK-Sarek-${{ matrix.variant }}-MaliG57"
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
 
@@ -175,6 +275,6 @@ jobs:
         with:
           files: ${{ env.OUTPUT_DIR }}/*.wcp
           generate_release_notes: true
-          name: "DXVK-Sarek - Mali G57"
+          name: "DXVK-Sarek ${{ matrix.variant }} - Mali G57"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,42 +1,53 @@
-name: Build DXVK (Winlator - Mali G57 / Helio G99)
+name: "Build DXVK (Winlator - Mali G57)"
 
 on:
   workflow_dispatch:
     inputs:
-      dxvk_version:
-        description: 'DXVK version/branch/tag'
+      variant:
+        description: 'Build variant (all/one)'
         required: false
-        default: 'dxvk-2.6.1'
-        type: string
-      enable_async:
-        description: 'Enable async pipeline (GPLALL fork)'
-        required: false
-        default: true
-        type: boolean
-      build_32bit:
-        description: 'Build 32-bit DLLs (WoW64)'
-        required: false
-        default: true
-        type: boolean
-      build_64bit:
-        description: 'Build 64-bit DLLs'
-        required: false
-        default: true
-        type: boolean
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - balanced
+          - performance
+          - compatibility
+          - low-vram
+          - ultra
   push:
     tags:
       - 'dxvk-*'
 
 env:
-  DXVK_REPO: 'https://github.com/doitsujin/dxvk.git'
   DXVK_GPLALL_REPO: 'https://github.com/Digger1955/dxvk-gplall.git'
   OUTPUT_DIR: 'dxvk-output'
 
 jobs:
   build-dxvk:
-    name: DXVK ${{ inputs.enable_async == true && '(GPLALL+Async)' || '(Standard)' }}
+    name: "DXVK ${{ matrix.variant }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 120
+    if: inputs.variant == 'all' || inputs.variant == matrix.variant || github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: balanced
+            tag: "GPLALL-2.6.8-async-balanced"
+            desc: "Balanced - Best overall for Mali G57"
+          - variant: performance
+            tag: "GPLALL-2.6.8-async-perf"
+            desc: "Performance - Max FPS, lower latency"
+          - variant: compatibility
+            tag: "GPLALL-2.6.8-async-compat"
+            desc: "Compatibility - Fix graphical glitches"
+          - variant: low-vram
+            tag: "GPLALL-2.6.8-async-lowvram"
+            desc: "Low VRAM - Reduced memory usage"
+          - variant: ultra
+            tag: "GPLALL-2.6.8-async-ultra"
+            desc: "Ultra - Maximum quality settings"
 
     steps:
       - name: Setup gh + git auth
@@ -64,23 +75,16 @@ jobs:
           sudo update-alternatives --set i686-w64-mingw32-gcc /usr/bin/i686-w64-mingw32-gcc-posix
           sudo update-alternatives --set i686-w64-mingw32-g++ /usr/bin/i686-w64-mingw32-g++-posix
 
-      - name: Clone DXVK source
+      - name: Clone DXVK-GPLALL
         run: |
-          if [ "${{ inputs.enable_async }}" = "true" ]; then
-            git clone --recursive --branch GPLALL-master-2.6.8 \
-              ${{ env.DXVK_GPLALL_REPO }} dxvk
-          else
-            git clone --recursive --branch ${{ inputs.dxvk_version }} \
-              ${{ env.DXVK_REPO }} dxvk
-          fi
+          git clone --recursive --branch GPLALL-master-2.6.8 \
+            ${{ env.DXVK_GPLALL_REPO }} dxvk
           cd dxvk
-          echo "## DXVK Build Info" >> $GITHUB_STEP_SUMMARY
-          echo "- Source: $(git remote get-url origin)" >> $GITHUB_STEP_SUMMARY
-          echo "- Branch: $(git branch --show-current)" >> $GITHUB_STEP_SUMMARY
+          echo "## DXVK ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Variant: ${{ matrix.variant }}" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
 
       - name: Build 64-bit DXVK
-        if: inputs.build_64bit == true
         run: |
           cd dxvk
           meson setup build.w64 \
@@ -93,14 +97,12 @@ jobs:
             -Db_ndebug=if-release \
             -Denable_d3d8=true \
             -Denable_d3d9=true \
-            -Denable_d3d10=true \
             -Denable_d3d11=true \
             -Denable_dxgi=true
           ninja -C build.w64 -j$(nproc)
           ninja -C build.w64 install
 
       - name: Build 32-bit DXVK
-        if: inputs.build_32bit == true
         run: |
           cd dxvk
           meson setup build.w32 \
@@ -113,7 +115,6 @@ jobs:
             -Db_ndebug=if-release \
             -Denable_d3d8=true \
             -Denable_d3d9=true \
-            -Denable_d3d10=true \
             -Denable_d3d11=true \
             -Denable_dxgi=true
           ninja -C build.w32 -j$(nproc)
@@ -124,24 +125,17 @@ jobs:
           STAGE="dxvk-stage"
           mkdir -p "$STAGE/system32" "$STAGE/syswow64"
 
-          if [ "${{ inputs.build_64bit }}" = "true" ]; then
-            cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
-          fi
-          if [ "${{ inputs.build_32bit }}" = "true" ]; then
-            cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
-          fi
+          cp build-install/x64/bin/*.dll "$STAGE/system32/" 2>/dev/null || true
+          cp build-install/x32/bin/*.dll "$STAGE/syswow64/" 2>/dev/null || true
 
-          DXVK_VER="${{ inputs.dxvk_version }}"
-          if [ "${{ inputs.enable_async }}" = "true" ]; then
-            DXVK_VER="GPLALL-2.6.8-async"
-          fi
+          DXVK_VER="${{ matrix.tag }}"
 
           cat > "$STAGE/profile.json" << 'EOF'
           {
             "type": "DXVK",
             "versionName": "PLACEHOLDER_VER-mali-g57",
             "versionCode": 0,
-            "description": "DXVK optimized for Mali G57 MC2 + Helio G99. Async pipeline, tiler batch, low-latency.",
+            "description": "${PLACEHOLDER_DESC}",
             "files": [
               {"source": "system32/d3d8.dll", "target": "${system32}/d3d8.dll"},
               {"source": "system32/d3d9.dll", "target": "${system32}/d3d9.dll"},
@@ -157,19 +151,125 @@ jobs:
           }
           EOF
           sed -i "s/PLACEHOLDER_VER/${DXVK_VER}/" "$STAGE/profile.json"
+          sed -i "s/\${PLACEHOLDER_DESC}/${{ matrix.desc }}/g" "$STAGE/profile.json"
 
-          cat > "$STAGE/dxvk.conf" << 'DXEOF'
-          dxvk.enableAsync = True
-          dxvk.enableGraphicsPipelineLibrary = False
-          dxvk.enableStateCache = True
-          dxvk.numCompilerThreads = 0
-          dxvk.framePace = low-latency
-          dxvk.maxFrameLatency = 1
-          dxvk.tilerMode = batch
-          d3d9.floatEmulation = Strict
-          d3d9.forceSamplerTypeSpecConstants = True
-          d3d9.supportDFFormats = True
-          DXEOF
+          # Generate variant-specific dxvk.conf
+          case "${{ matrix.variant }}" in
+            balanced)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.enableAsync = True
+              dxvk.enableGraphicsPipelineLibrary = False
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 2
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.apitraceMode = False
+              d3d11.syncInterval = 0
+              d3d9.presentInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.forceSamplerTypeSpecConstants = True
+              d3d9.supportDFFormats = True
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              dxvk.shrinkNvidiaHvvHeap = False
+              DXEOF
+              ;;
+            performance)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.enableAsync = True
+              dxvk.enableGraphicsPipelineLibrary = False
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = flow
+              dxvk.maxFrameLatency = 0
+              dxvk.numAsyncThreads = 4
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.disableMsaa = True
+              d3d11.forceTightFrustum = True
+              d3d9.presentInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.forceSamplerTypeSpecConstants = True
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d9.fastAssert = True
+              dxvk.shrinkNvidiaHvvHeap = False
+              DXEOF
+              ;;
+            compatibility)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.enableAsync = True
+              dxvk.enableGraphicsPipelineLibrary = False
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 2
+              dxvk.numAsyncThreads = 1
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.apitraceMode = False
+              d3d9.presentInterval = 0
+              d3d9.floatEmulation = True
+              d3d9.forceSamplerTypeSpecConstants = False
+              d3d9.supportDFFormats = True
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d9upportXceedZBuffer = True
+              dxvk.shrinkNvidiaHvvHeap = False
+              DXEOF
+              ;;
+            low-vram)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.enableAsync = True
+              dxvk.enableGraphicsPipelineLibrary = False
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 1
+              d3d11.cachedDynamicResources = None
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.maxImplicitDiscardSize = 0
+              d3d9.presentInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.forceSamplerTypeSpecConstants = True
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d9.textureMemory = 32
+              dxvk.shrinkNvidiaHvvHeap = True
+              DXEOF
+              ;;
+            ultra)
+              cat > "$STAGE/dxvk.conf" << 'DXEOF'
+              dxvk.enableAsync = True
+              dxvk.enableGraphicsPipelineLibrary = False
+              dxvk.enableStateCache = True
+              dxvk.numCompilerThreads = 0
+              dxvk.framePace = low-latency
+              dxvk.maxFrameLatency = 1
+              dxvk.numAsyncThreads = 4
+              d3d11.cachedDynamicResources = Memory
+              d3d11.enableDeferredContexts = False
+              d3d11.syncInterval = 0
+              d3d11.apitraceMode = False
+              d3d9.presentInterval = 0
+              d3d9.floatEmulation = Strict
+              d3d9.forceSamplerTypeSpecConstants = True
+              d3d9.supportDFFormats = True
+              d3d9.allowDoNotWait = True
+              d3d9.enableDialogMode = True
+              d3d9.supportXceedZBuffer = True
+              d3d9.disableA8R8G8B8 = False
+              dxvk.shrinkNvidiaHvvHeap = False
+              DXEOF
+              ;;
+          esac
 
           cd "$STAGE"
           tar -cf ../dxvk-mali-g57.tar . --sort=name
@@ -184,7 +284,7 @@ jobs:
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: DXVK-MaliG57-Winlator
+          name: "DXVK-${{ matrix.variant }}-MaliG57"
           path: ${{ env.OUTPUT_DIR }}/*.wcp
           retention-days: 30
 
@@ -194,6 +294,6 @@ jobs:
         with:
           files: ${{ env.OUTPUT_DIR }}/*.wcp
           generate_release_notes: true
-          name: "DXVK ${{ inputs.dxvk_version }} - Mali G57"
+          name: "DXVK ${{ matrix.variant }} - Mali G57"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -1,23 +1,20 @@
-name: Build FEXCore (Winlator - Helio G99 ARM64)
+name: "Build FEXCore (Winlator - Helio G99)"
 
 on:
   workflow_dispatch:
     inputs:
-      fex_version:
-        description: 'FEX version (e.g., FEX-2507)'
+      variant:
+        description: 'Build variant (all/one)'
         required: false
-        default: 'FEX-2507'
-        type: string
-      enable_thunks:
-        description: 'Build Vulkan/GL thunks'
-        required: false
-        default: true
-        type: boolean
-      enable_lto:
-        description: 'Enable LTO'
-        required: false
-        default: true
-        type: boolean
+        default: 'all'
+        type: choice
+        options:
+          - all
+          - fex-2507-full
+          - fex-2507-thunks
+          - fex-2506-stable
+          - fex-2505-legacy
+          - fex-2507-minimal
   push:
     tags:
       - 'fex-*'
@@ -28,9 +25,44 @@ env:
 
 jobs:
   build-fexcore:
-    name: FEXCore (ARM64 - Helio G99)
+    name: "FEXCore ${{ matrix.variant }}"
     runs-on: ubuntu-24.04
     timeout-minutes: 180
+    if: inputs.variant == 'all' || inputs.variant == matrix.variant || github.event_name == 'push'
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - variant: fex-2507-full
+            tag: "FEX-2507-full"
+            fex_version: "FEX-2507"
+            desc: "FEX 2507 Full - Thunks + LTO + optimized"
+            thunks: true
+            lto: true
+          - variant: fex-2507-thunks
+            tag: "FEX-2507-thunks"
+            fex_version: "FEX-2507"
+            desc: "FEX 2507 Thunks - Vulkan/GL thunks, no LTO"
+            thunks: true
+            lto: false
+          - variant: fex-2506-stable
+            tag: "FEX-2506-stable"
+            fex_version: "FEX-2506"
+            desc: "FEX 2506 Stable - Proven stable with thunks+LTO"
+            thunks: true
+            lto: true
+          - variant: fex-2505-legacy
+            tag: "FEX-2505-legacy"
+            fex_version: "FEX-2505"
+            desc: "FEX 2505 Legacy - Older stable baseline"
+            thunks: true
+            lto: true
+          - variant: fex-2507-minimal
+            tag: "FEX-2507-minimal"
+            fex_version: "FEX-2507"
+            desc: "FEX 2507 Minimal - Smallest binary, no thunks"
+            thunks: false
+            lto: false
 
     steps:
       - name: Setup gh + git auth
@@ -54,34 +86,56 @@ jobs:
             libcurl4-openssl-dev libgl-dev libglx-dev libegl-dev \
             libx11-dev libxext-dev libxrandr-dev libxi-dev libxfixes-dev \
             libwayland-dev wayland-protocols nasm \
-            libc6-dev libgcc-14-dev libstdc++-14-dev
+            libc6-dev libgcc-14-dev libstdc++-14-dev \
+            gcc-aarch64-linux-gnu g++-aarch64-linux-gnu \
+            libssl-dev:arm64 zlib1g-dev:arm64
 
       - name: Clone FEX
         run: |
-          git clone --recurse-submodules --branch ${{ inputs.fex_version }} \
+          git clone --recurse-submodules --branch ${{ matrix.fex_version }} \
             --depth 1 ${{ env.FEX_REPO }} fex || \
           git clone --recurse-submodules --depth 1 ${{ env.FEX_REPO }} fex
           cd fex
-          echo "## FEX Build Info" >> $GITHUB_STEP_SUMMARY
-          echo "- Version: ${{ inputs.fex_version }}" >> $GITHUB_STEP_SUMMARY
+          ACTUAL_VER=$(git describe --tags --always 2>/dev/null || echo "${{ matrix.fex_version }}")
+          echo "ACTUAL_VER=$ACTUAL_VER" >> $GITHUB_ENV
+          echo "## FEX ${{ matrix.variant }} Build" >> $GITHUB_STEP_SUMMARY
+          echo "- Version: $ACTUAL_VER" >> $GITHUB_STEP_SUMMARY
           echo "- Commit: $(git log --oneline -1)" >> $GITHUB_STEP_SUMMARY
+          echo "- Thunks: ${{ matrix.thunks }}" >> $GITHUB_STEP_SUMMARY
+          echo "- LTO: ${{ matrix.lto }}" >> $GITHUB_STEP_SUMMARY
 
-      - name: Configure FEX (x86 host debug)
+      - name: Configure FEX (ARM64 cross-compile)
         run: |
           cd fex
           mkdir Build && cd Build
-          CC=clang-17 CXX=clang++-17 cmake \
+          cat > ../toolchain-aarch64.cmake << 'TOOLCHAIN'
+          set(CMAKE_SYSTEM_NAME Linux)
+          set(CMAKE_SYSTEM_PROCESSOR aarch64)
+          set(CMAKE_C_COMPILER clang-17)
+          set(CMAKE_CXX_COMPILER clang++-17)
+          set(CMAKE_ASM_COMPILER clang-17)
+          set(CMAKE_AR llvm-ar-17)
+          set(CMAKE_RANLIB llvm-ranlib-17)
+          set(CMAKE_C_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_CXX_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_ASM_COMPILER_TARGET aarch64-linux-gnu)
+          set(CMAKE_FIND_ROOT_PATH /usr/aarch64-linux-gnu)
+          set(CMAKE_FIND_ROOT_PATH_MODE_PROGRAM NEVER)
+          set(CMAKE_FIND_ROOT_PATH_MODE_LIBRARY ONLY)
+          set(CMAKE_FIND_ROOT_PATH_MODE_INCLUDE ONLY)
+          TOOLCHAIN
+          cmake \
+            -DCMAKE_TOOLCHAIN_FILE=../toolchain-aarch64.cmake \
             -DCMAKE_INSTALL_PREFIX=/usr \
             -DCMAKE_BUILD_TYPE=Release \
-            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/" \
-            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/" \
-            -DENABLE_LTO=${{ inputs.enable_lto && 'True' || 'False' }} \
+            -DCMAKE_EXE_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
+            -DCMAKE_SHARED_LINKER_FLAGS="--sysroot=/usr/aarch64-linux-gnu" \
+            -DENABLE_LTO=${{ matrix.lto && 'True' || 'False' }} \
             -DENABLE_ASSERTIONS=False \
-            -DBUILD_TESTING=True \
-            -DBUILD_THUNKS=${{ inputs.enable_thunks && 'True' || 'False' }} \
+            -DBUILD_TESTING=False \
+            -DBUILD_THUNKS=${{ matrix.thunks && 'True' || 'False' }} \
             -DBUILD_FEXCONFIG=False \
             -DENABLE_CCACHE=True \
-            -DENABLE_X86_HOST_DEBUG=True \
             -G Ninja \
             ..
 
@@ -102,19 +156,21 @@ jobs:
           cp fex-install/usr/bin/FEX* "$STAGE/usr/bin/" 2>/dev/null || true
           cp fex-install/usr/lib/libFEXCore* "$STAGE/usr/lib/" 2>/dev/null || true
           cp fex-install/usr/lib/FEXCore/* "$STAGE/usr/lib/" 2>/dev/null || true
+          cp fex-install/usr/lib/fex-emu* "$STAGE/usr/lib/" 2>/dev/null || true
 
-          FEX_VER="${{ inputs.fex_version }}"
+          FEX_VER="${ACTUAL_VER}"
+          FEX_TAG="${{ matrix.tag }}"
 
-          cat > "$STAGE/profile.json" << 'EOF'
+          cat > "$STAGE/profile.json" << EOF
           {
             "type": "FEXCore",
-            "versionName": "FEX-helio-g99",
+            "versionName": "${FEX_TAG}",
             "versionCode": 0,
-            "description": "FEX-Emu for Helio G99. x86 emulation on ARM64 with Vulkan/GL thunks.",
+            "description": "${{ matrix.desc }}",
             "files": [
-              {"source": "usr/bin/FEXLoader", "target": "${bindir}/FEXLoader"},
-              {"source": "usr/bin/FEXInterpreter", "target": "${bindir}/FEXInterpreter"},
-              {"source": "usr/lib/libFEXCore.so", "target": "${libdir}/libFEXCore.so"}
+              {"source": "usr/bin/FEXLoader", "target": "\${bindir}/FEXLoader"},
+              {"source": "usr/bin/FEXInterpreter", "target": "\${bindir}/FEXInterpreter"},
+              {"source": "usr/lib/libFEXCore.so", "target": "\${libdir}/libFEXCore.so"}
             ]
           }
           EOF
@@ -123,7 +179,7 @@ jobs:
           tar -cf ../fex-helio-g99.tar . --sort=name
           cd ..
           mkdir -p "${{ env.OUTPUT_DIR }}"
-          zstd --ultra -22 fex-helio-g99.tar -o "${{ env.OUTPUT_DIR }}/fex-${FEX_VER}-helio-g99.tzst"
+          zstd --ultra -22 fex-helio-g99.tar -o "${{ env.OUTPUT_DIR }}/fex-${FEX_TAG}-helio-g99.tzst"
           rm -f fex-helio-g99.tar
 
           echo "### Output:" >> $GITHUB_STEP_SUMMARY
@@ -132,7 +188,7 @@ jobs:
       - name: Upload Winlator addon
         uses: actions/upload-artifact@v4
         with:
-          name: FEXCore-HelioG99-Winlator
+          name: "FEXCore-${{ matrix.variant }}-Winlator"
           path: ${{ env.OUTPUT_DIR }}/*.tzst
           retention-days: 30
 
@@ -142,6 +198,6 @@ jobs:
         with:
           files: ${{ env.OUTPUT_DIR }}/*.tzst
           generate_release_notes: true
-          name: "FEXCore ${{ inputs.fex_version }} - Helio G99"
+          name: "FEXCore ${{ matrix.variant }} - Helio G99"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

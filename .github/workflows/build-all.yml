@@ -4,24 +4,24 @@ on:
   workflow_dispatch:
     inputs:
       build_dxvk:
-        description: 'Build DXVK (GPLALL)'
+        description: 'Build DXVK (all 5 variants)'
         required: false
         default: true
         type: boolean
       build_dxvk_sarek:
-        description: 'Build DXVK-Sarek'
+        description: 'Build DXVK-Sarek (all 5 variants)'
         required: false
         default: true
         type: boolean
       build_fex:
-        description: 'Build FEXCore'
+        description: 'Build FEXCore (all 5 variants)'
         required: false
         default: true
         type: boolean
       build_proton:
-        description: 'Build Proton DXVK'
+        description: 'Build Proton DXVK (all 5 variants)'
         required: false
-        default: false
+        default: true
         type: boolean
 
 jobs:
@@ -29,32 +29,28 @@ jobs:
     if: inputs.build_dxvk == true
     uses: ./.github/workflows/build-dxvk.yml
     with:
-      enable_async: true
-      build_32bit: true
-      build_64bit: true
+      variant: all
     secrets: inherit
 
   build-dxvk-sarek:
     if: inputs.build_dxvk_sarek == true
     uses: ./.github/workflows/build-dxvk-sarek.yml
     with:
-      build_32bit: true
-      build_64bit: true
+      variant: all
     secrets: inherit
 
   build-fex:
     if: inputs.build_fex == true
     uses: ./.github/workflows/build-fexcore.yml
     with:
-      enable_thunks: true
-      enable_lto: true
+      variant: all
     secrets: inherit
 
   build-proton:
     if: inputs.build_proton == true
     uses: ./.github/workflows/build-proton.yml
     with:
-      use_gplall: true
+      variant: all
     secrets: inherit
 
   summary:
@@ -67,7 +63,7 @@ jobs:
           echo "# Build Summary" >> $GITHUB_STEP_SUMMARY
           echo "| Component | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----------|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| DXVK | ${{ needs.build-dxvk.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| DXVK-Sarek | ${{ needs.build-dxvk-sarek.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| FEXCore | ${{ needs.build-fex.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Proton | ${{ needs.build-proton.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK (5 variants) | ${{ needs.build-dxvk.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| DXVK-Sarek (5 variants) | ${{ needs.build-dxvk-sarek.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| FEXCore (5 variants) | ${{ needs.build-fex.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Proton (5 variants) | ${{ needs.build-proton.result || 'skipped' }} |" >> $GITHUB_STEP_SUMMARY
